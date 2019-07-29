@@ -10,24 +10,6 @@ const CONFIG_FILE = path.resolve(__dirname, "tsconfig.json");
 const SRC_PATH = path.resolve(__dirname, "src");
 const BUILD_PATH = path.resolve(__dirname, "dist");
 
-const DtsBundlePlugin = function() {
-    this.plugin("done", () => {
-        const dts = require("dts-bundle");
-
-        dts.bundle({
-            name: "ornatejs",
-            main: "dist/src/ornate.d.ts",
-            out: "index.d.ts",
-            baseDir: "dist",
-            removeSource: true,
-            outputAsModuleFolder: false
-        });
-
-        fs.rmdir("dist/src", (err) => console.error(err));
-        fs.rmdir("dist/test", (err) => console.error(err));
-    });
-};
-
 const WatchReportPlugin = function() {
     this.plugin("watch-run", (watching, done) => {
         const name = watching.options.name;
@@ -113,7 +95,6 @@ const ornateConfig = {
         plugins: [new TsconfigPathsPlugin({ configFile: CONFIG_FILE })]
 	},
 	plugins: [
-        DtsBundlePlugin,
         WatchReportPlugin
     ],
     optimization,

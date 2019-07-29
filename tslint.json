@@ -1,0 +1,24 @@
+{
+   "extends": ["tslint:latest"],
+    "linterOptions": {
+        "typeCheck": true
+    },
+    "rules": {
+        "max-classes-per-file": false,
+        "max-line-length": {"options": [150]},
+        "no-console": false,
+        "no-empty": false,
+        "no-implicit-dependencies": false,
+        "no-magic-numbers": true,
+        "no-null-keyword": true,
+        "no-return-await": true,
+        "no-shadowed-variable": true,
+        "object-literal-sort-keys": false,
+        "ordered-imports": false,
+        "prefer-conditional-expression": true,
+        "prefer-object-spread": true,
+        "promise-function-async": true,
+        "trailing-comma": false,
+        "variable-name": [true, "ban-keywords", "check-format", "allow-leading-underscore", "allow-pascal-case"]
+    }
+}

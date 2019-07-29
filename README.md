@@ -4,7 +4,7 @@ A small decorator library to create express apps
 ## Usage
 
 ```
-import * as ornate from "ornate";
+import * as ornate from "ornatejs";
 
 interface IUser {
     readonly name: string;

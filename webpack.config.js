@@ -15,7 +15,7 @@ const DtsBundlePlugin = function() {
         const dts = require("dts-bundle");
 
         dts.bundle({
-            name: "ornate",
+            name: "ornatejs",
             main: "dist/src/ornate.d.ts",
             out: "index.d.ts",
             baseDir: "dist",
@@ -69,7 +69,7 @@ if (environment === "production") {
 
 const ornateConfig = {
     mode   : environment,
-    name   : "ornate",
+    name   : "ornatejs",
     context: SRC_PATH,
     target : "node",
     externals: [nodeExternals()],

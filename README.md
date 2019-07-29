@@ -62,7 +62,7 @@ class HelloController {
      */
     @ornate.Get(":id")
     public getWithResolver(
-        @ornate.Param("id") @Resolve(UserService, "user") user: IUser
+        @ornate.Param("id") @ornate.Resolve(UserService, "user") user: IUser
     ): Promise<ornate.JsonResponse<IUser>> {
         return new ornate.JsonResponse(user);
     }

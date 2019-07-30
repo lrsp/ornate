@@ -34,7 +34,7 @@ let filename = "[name].js";
 let optimization = undefined;
 
 if (environment === "production") {
-    filename = "[name].min.js";
+    filename = "[name].js";
 
     optimization = {
         minimizer: [

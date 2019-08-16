@@ -9,11 +9,11 @@ const PROPERTY = Symbol("service:property");
 const CONTROLLER = Symbol("app:controller");
 const MIDDLEWARES = Symbol("app:middlewares");
 const ACTIONS = Symbol("controller:actions");
-const ACTION_AUTH = Symbol("action:auth");
 const ACTION_MIDDLEWARES = Symbol("action:middlewares");
 const ACTION_ARGS = Symbol("action:args");
 const ACTION_RESOLVE = Symbol("action:resolve");
 const ACTION_POLICY = Symbol("action:policy");
+const SESSION_RESOURCE = Symbol("session:resource");
 
 export const enum EMiddlewareOrder {
     BEFORE = "before",
@@ -26,6 +26,7 @@ export const enum EArgType {
     HOST = "host",
     HOSTNAME = "hostname",
     HEADER = "header",
+    AUTHORIZATION = "authorization",
     BODY = "body",
     PARAM = "param",
     QUERY = "query",
@@ -109,8 +110,7 @@ export interface IMiddlewareMetadata {
     readonly name: string;
     readonly handler: MiddlewareHandler<any>;
     readonly args: IActionArgsMetadata[];
-    readonly auth: IActionAuthMetadata[];
-    readonly resolve: IActionResourceMetadata[];
+    readonly session: ISessionResourceMetadata[];
 }
 
 export interface IControllerMetadata {
@@ -125,8 +125,7 @@ export interface IActionMetadata {
     readonly route: string;
     readonly handler: ActionHandler<any>;
     readonly args: IActionArgsMetadata[];
-    readonly auth: IActionAuthMetadata[];
-    readonly resolve: IActionResourceMetadata[];
+    readonly resolve: IActionResolveMetadata[];
     readonly policies: IActionPolicyMetadata[];
 }
 
@@ -144,14 +143,15 @@ export interface IActionArgsMetadata {
     readonly required: boolean;
 }
 
-export interface IActionAuthMetadata {
+export interface IActionResolveMetadata {
     readonly service: IType<any>;
     readonly index: number;
     readonly name: string;
+    readonly auth: boolean;
+    readonly optional: boolean;
 }
 
-export interface IActionResourceMetadata {
-    readonly service: IType<any>;
+export interface ISessionResourceMetadata {
     readonly index: number;
     readonly name: string;
     readonly required: boolean;
@@ -235,21 +235,27 @@ export function After<T>(service: IType<T>, name: string, ...params: any[]) {
     };
 }
 
-export function Auth<T>(service: IType<T>, name: string) {
+export function Auth<T>(service: IType<T>, name: string, required?: boolean) {
     return (target: any, handler: string, index: number): void => {
-        Registry.defineAuthResource(target.constructor, handler, index, service, name);
+        Registry.defineResolver(target.constructor, handler, index, service, name, true, required === false);
     };
 }
 
 export function Resolve<T>(service: IType<T>, name: string, required?: boolean) {
     return (target: any, handler: string, index: number): void => {
-        Registry.defineResolveResource(target.constructor, handler, index, service, name, required === true);
+        Registry.defineResolver(target.constructor, handler, index, service, name, false, required === false);
     };
 }
 
 export function Policy<T>(service: IType<T>, name: string) {
     return (target: any, handler: string, index: number): void => {
-        Registry.defineResourcePolicy(target.constructor, handler, index, service, name);
+        Registry.definePolicy(target.constructor, handler, index, service, name);
+    };
+}
+
+export function Session(name: string, required?: boolean) {
+    return (target: any, handler: string, index: number): void => {
+        Registry.defineSessionResource(target.constructor, handler, index, name, required === true);
     };
 }
 
@@ -280,6 +286,12 @@ export function Hostname() {
 export function Header(name: string, required?: boolean) {
     return (target: any, handler: string, index: number): void => {
         Registry.defineActionArg(target.constructor, EArgType.HEADER, handler, index, name, required === true);
+    };
+}
+
+export function Authorization(type: string, required?: boolean) {
+    return (target: any, handler: string, index: number): void => {
+        Registry.defineActionArg(target.constructor, EArgType.AUTHORIZATION, handler, index, type, required === true);
     };
 }
 
@@ -408,34 +420,25 @@ export class Registry {
         this._addActionArgsMetadata(actionArgs, type, index, name, required);
     }
 
-    public static defineAuthResource<T>(target: IType<any>, handler: string, index: number, service: IType<T>, name: string): void {
-        let actionAuth = Reflect.getMetadata(ACTION_AUTH, target, handler);
-        if (actionAuth === undefined) {
-            actionAuth = new Array<IActionAuthMetadata>();
-            Reflect.defineMetadata(ACTION_AUTH, actionAuth, target, handler);
-        }
-
-        this._addActionAuthMetadata(actionAuth, index, service, name);
-    }
-
-    public static defineResolveResource<T>(
+    public static defineResolver<T>(
         target: IType<any>,
         handler: string,
         index: number,
         service: IType<T>,
         name: string,
-        required: boolean
+        auth: boolean,
+        optional: boolean
     ): void {
         let actionResolve = Reflect.getMetadata(ACTION_RESOLVE, target, handler);
         if (actionResolve === undefined) {
-            actionResolve = new Array<IActionResourceMetadata>();
+            actionResolve = new Array<IActionResolveMetadata>();
             Reflect.defineMetadata(ACTION_RESOLVE, actionResolve, target, handler);
         }
 
-        this._addActionResolveMetadata(actionResolve, index, service, name, required);
+        this._addActionResolveMetadata(actionResolve, index, service, name, auth, optional);
     }
 
-    public static defineResourcePolicy<T>(target: IType<any>, handler: string, index: number, service: IType<T>, name: string): void {
+    public static definePolicy<T>(target: IType<any>, handler: string, index: number, service: IType<T>, name: string): void {
         let policies = Reflect.getMetadata(ACTION_POLICY, target, handler);
         if (policies === undefined) {
             policies = new Array<IActionPolicyMetadata>();
@@ -443,6 +446,22 @@ export class Registry {
         }
 
         this._addActionPolicyMetadata(policies, index, service, name);
+    }
+
+    public static defineSessionResource(
+        target: IType<any>,
+        handler: string,
+        index: number,
+        name: string,
+        required: boolean
+    ): void {
+        let sessionResource = Reflect.getMetadata(SESSION_RESOURCE, target, handler);
+        if (sessionResource === undefined) {
+            sessionResource = new Array<ISessionResourceMetadata>();
+            Reflect.defineMetadata(SESSION_RESOURCE, sessionResource, target, handler);
+        }
+
+        this._addSessionResourceMetadata(sessionResource, index, name, required);
     }
 
     public static getModuleMetadata<T>(targetModule: IType<T>): IModuleMetadata {
@@ -559,16 +578,14 @@ export class Registry {
     ): IMiddlewareMetadata {
         // Add args.
         const args = Reflect.getMetadata(ACTION_ARGS, targetService, handler.name);
-        const auth = Reflect.getMetadata(ACTION_AUTH, targetService, handler.name);
-        const resolve = Reflect.getMetadata(ACTION_RESOLVE, targetService, handler.name);
+        const session = Reflect.getMetadata(SESSION_RESOURCE, targetService, handler.name);
 
         const metadata: IMiddlewareMetadata = {
             service: targetService.name,
             name,
             handler,
             args: args !== undefined ? args : [],
-            auth: auth !== undefined ? auth : [],
-            resolve: resolve !== undefined ? resolve : []
+            session: session !== undefined ? session : []
         };
 
         // Add middleware to array.
@@ -586,7 +603,6 @@ export class Registry {
     ): IActionMetadata {
         // Add args
         const args = Reflect.getMetadata(ACTION_ARGS, target, handler.name);
-        const auth = Reflect.getMetadata(ACTION_AUTH, target, handler.name);
         const resolve = Reflect.getMetadata(ACTION_RESOLVE, target, handler.name);
         const policies = Reflect.getMetadata(ACTION_POLICY, target, handler.name);
 
@@ -596,7 +612,6 @@ export class Registry {
             route,
             handler,
             args: args !== undefined ? args : [],
-            auth: auth !== undefined ? auth : [],
             resolve: resolve !== undefined ? resolve : [],
             policies: policies !== undefined ? policies : []
         };
@@ -645,38 +660,23 @@ export class Registry {
         return metadata;
     }
 
-    private static _addActionAuthMetadata<T>(
-        actionAuth: IActionAuthMetadata[],
-        index: number,
-        service: IType<T>,
-        name: string
-    ): IActionAuthMetadata {
-        const metadata: IActionAuthMetadata = {
-            service,
-            index,
-            name
-        };
-
-        actionAuth.unshift(metadata);
-
-        return metadata;
-    }
-
     private static _addActionResolveMetadata<T>(
-        actionResources: IActionResourceMetadata[],
+        resolveMetadata: IActionResolveMetadata[],
         index: number,
         service: IType<T>,
         name: string,
-        required: boolean
-    ): IActionResourceMetadata {
-        const metadata: IActionResourceMetadata = {
+        auth: boolean,
+        optional: boolean
+    ): IActionResolveMetadata {
+        const metadata: IActionResolveMetadata = {
             service,
             index,
             name,
-            required
+            auth,
+            optional
         };
 
-        actionResources.unshift(metadata);
+        resolveMetadata.unshift(metadata);
 
         return metadata;
     }
@@ -694,6 +694,23 @@ export class Registry {
         };
 
         policies.unshift(metadata);
+
+        return metadata;
+    }
+
+    private static _addSessionResourceMetadata(
+        sessionResources: ISessionResourceMetadata[],
+        index: number,
+        name: string,
+        required: boolean
+    ): ISessionResourceMetadata {
+        const metadata: ISessionResourceMetadata = {
+            index,
+            name,
+            required
+        };
+
+        sessionResources.unshift(metadata);
 
         return metadata;
     }

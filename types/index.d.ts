@@ -135,8 +135,7 @@ export interface IMiddlewareMetadata {
     readonly name: string;
     readonly handler: MiddlewareHandler<any>;
     readonly args: IActionArgsMetadata[];
-    readonly auth: IActionAuthMetadata[];
-    readonly resolve: IActionResourceMetadata[];
+    readonly session: ISessionResourceMetadata[];
 }
 export interface IControllerMetadata {
     readonly name: string;
@@ -149,8 +148,7 @@ export interface IActionMetadata {
     readonly route: string;
     readonly handler: ActionHandler<any>;
     readonly args: IActionArgsMetadata[];
-    readonly auth: IActionAuthMetadata[];
-    readonly resolve: IActionResourceMetadata[];
+    readonly resolve: IActionResolveMetadata[];
     readonly policies: IActionPolicyMetadata[];
 }
 export interface IActionMiddlewareMetadata {
@@ -165,13 +163,14 @@ export interface IActionArgsMetadata {
     readonly name: string;
     readonly required: boolean;
 }
-export interface IActionAuthMetadata {
+export interface IActionResolveMetadata {
     readonly service: IType<any>;
     readonly index: number;
     readonly name: string;
+    readonly auth: boolean;
+    readonly optional: boolean;
 }
-export interface IActionResourceMetadata {
-    readonly service: IType<any>;
+export interface ISessionResourceMetadata {
     readonly index: number;
     readonly name: string;
     readonly required: boolean;
@@ -193,14 +192,16 @@ export function Put(route: string): (target: any, handler: string, descriptor: P
 export function Delete(route: string): (target: any, handler: string, descriptor: PropertyDescriptor) => void;
 export function Before<T>(service: IType<T>, name: string, ...params: any[]): (target: any, handler: string, descriptor: PropertyDescriptor) => void;
 export function After<T>(service: IType<T>, name: string, ...params: any[]): (target: any, handler: string, descriptor: PropertyDescriptor) => void;
-export function Auth<T>(service: IType<T>, name: string): (target: any, handler: string, index: number) => void;
+export function Auth<T>(service: IType<T>, name: string, required?: boolean): (target: any, handler: string, index: number) => void;
 export function Resolve<T>(service: IType<T>, name: string, required?: boolean): (target: any, handler: string, index: number) => void;
 export function Policy<T>(service: IType<T>, name: string): (target: any, handler: string, index: number) => void;
+export function Session(name: string, required?: boolean): (target: any, handler: string, index: number) => void;
 export function Req(): (target: any, handler: string, index: number) => void;
 export function Res(): (target: any, handler: string, index: number) => void;
 export function Host(): (target: any, handler: string, index: number) => void;
 export function Hostname(): (target: any, handler: string, index: number) => void;
 export function Header(name: string, required?: boolean): (target: any, handler: string, index: number) => void;
+export function Authorization(type: string, required?: boolean): (target: any, handler: string, index: number) => void;
 export function Body(name: string, required?: boolean): (target: any, handler: string, index: number) => void;
 export function Param(name: string, required?: boolean): (target: any, handler: string, index: number) => void;
 export function Query(name: string, required?: boolean): (target: any, handler: string, index: number) => void;
@@ -217,9 +218,9 @@ export class Registry {
     static defineAction(targetController: IType<any>, method: ERequestMethod, route: string, handler: ActionHandler<any>): void;
     static defineActionMiddleware<T>(targetController: IType<any>, order: EMiddlewareOrder, service: IType<T>, name: string, params: any[], handler: ActionHandler<any>): void;
     static defineActionArg(target: IType<any>, type: EArgType, handler: string, index: number, name: string, required: boolean): void;
-    static defineAuthResource<T>(target: IType<any>, handler: string, index: number, service: IType<T>, name: string): void;
-    static defineResolveResource<T>(target: IType<any>, handler: string, index: number, service: IType<T>, name: string, required: boolean): void;
-    static defineResourcePolicy<T>(target: IType<any>, handler: string, index: number, service: IType<T>, name: string): void;
+    static defineResolver<T>(target: IType<any>, handler: string, index: number, service: IType<T>, name: string, required: boolean): void;
+    static definePolicy<T>(target: IType<any>, handler: string, index: number, service: IType<T>, name: string): void;
+    static defineSessionResource(target: IType<any>, handler: string, index: number, name: string, required: boolean): void;
     static getModuleMetadata<T>(targetModule: IType<T>): IModuleMetadata;
     static getServiceMetadata<T>(targetService: IType<T>): IServiceMetadata;
     static getMigrationMetadata<T>(targetMigration: IType<T>): IMigrationMetadata;
@@ -261,6 +262,10 @@ export interface IAuthorizationService {
     findRoutePermissions(method: ERequestMethod, path: string): IPermission[];
     checkRoutePermissions(auth: IAuthentication[], method: ERequestMethod, path: string): Promise<boolean>;
 }
+export interface IAuthorizationHeader {
+    readonly type: string;
+    readonly credentials: string;
+}
 export interface ILogger {
     trace(...args: any[]): void;
     debug(...args: any[]): void;
@@ -282,8 +287,7 @@ export interface IAppParams {
 }
 export interface IAppRequest extends express.Request {
     args: any[];
-    auth: Map<string, IAuthentication>;
-    resolved: Map<string, any>;
+    session: Map<string, any>;
 }
 export type AppResponse = express.Response;
 export class App {
@@ -297,6 +301,7 @@ export class App {
     };
     run(): Promise<void>;
     stop(): Promise<void>;
+    close(): Promise<void>;
     listen(host: string, port: number): Promise<void>;
 }
 export interface IHttpHeaders {

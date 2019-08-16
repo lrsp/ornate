@@ -25,22 +25,27 @@ import {
     IMiddlewareMetadata,
     IActionMetadata,
     IActionMiddlewareMetadata,
-    IActionAuthMetadata,
-    IActionResourceMetadata,
+    IActionResolveMetadata,
     IActionPolicyMetadata,
     IActionArgsMetadata,
+    ISessionResourceMetadata,
     ActionHandler,
     MiddlewareHandler
 } from "./decorators";
 
 import { ActionResponse } from "./responses";
-import { AppError, ParameterError, AuthenticationError, AuthorizationError } from "./errors";
+import { AppError, ParameterError, AuthorizationError } from "./errors";
 import { Test, ITestRequestOptions } from "./test";
 
 import * as os from "os";
 
 const DEFAULT_PORT = 80;
 const DEFAULT_HOST = "127.0.0.1";
+
+const AUTHORIZATION_HEADER = "authorization";
+const AUTHORIZATION_HEADER_REGEX = /^(.+) (.+)$/i;
+const AUTHORIZATION_HEADER_REGEX_TYPE = 1;
+const AUTHORIZATION_HEADER_REGEX_CREDENTIALS = 2;
 
 interface IModuleInstance {
     name: string;
@@ -114,6 +119,11 @@ export interface IAuthorizationService {
     checkRoutePermissions(auth: IAuthentication[], method: ERequestMethod, path: string): Promise<boolean>;
 }
 
+export interface IAuthorizationHeader {
+    type: string;
+    credentials: string;
+}
+
 export interface ILogger {
     trace(...args: any[]): void;
     debug(...args: any[]): void;
@@ -138,8 +148,7 @@ export interface IAppParams {
 
 export interface IAppRequest extends express.Request {
     args: any[];
-    auth: Map<string, IAuthentication>;
-    resolved: Map<string, any>;
+    session: Map<string, any>;
 }
 
 export type AppResponse = express.Response;
@@ -245,6 +254,20 @@ export class App {
 
     public async stop(): Promise<void> {
         await this._stopServices();
+    }
+
+    public async close(): Promise<void> {
+        return new Promise<void>(async (resolve, reject) => {
+            await this._stopServices();
+
+            this._httpServer.close((err: Error) => {
+                if (err !== undefined) {
+                    reject(err);
+                } else {
+                    resolve();
+                }
+            });
+        });
     }
 
     public async listen(host: string, port: number): Promise<void> {
@@ -499,8 +522,7 @@ export class App {
 
         const initialise = this._initialiseAction.bind(this, actionMetadata, actionName, actionRoute);
         const checkPermissions = this._checkPermissions.bind(this, moduleInstance, actionMetadata, actionName, actionRoute);
-        const authHandlers = this._bindAuthResolvers(moduleInstance, actionMetadata, actionName, actionRoute);
-        const resolveHandlers = this._bindResourceResolvers(moduleInstance, actionMetadata, actionName, actionRoute);
+        const resolveHandlers = this._bindResolvers(moduleInstance, actionMetadata, actionName, actionRoute);
         const policyHandlers = this._bindPolicies(moduleInstance, actionMetadata, actionName, actionRoute);
         const beforeHandlers = this._bindMiddlewares(moduleInstance, actionMetadata, actionName, actionRoute, EMiddlewareOrder.BEFORE);
         const afterHandlers = this._bindMiddlewares(moduleInstance, actionMetadata, actionName, actionRoute, EMiddlewareOrder.AFTER);
@@ -508,7 +530,6 @@ export class App {
 
         const handlers: express.RequestHandler[] = [
             initialise,
-            ...authHandlers,
             ...resolveHandlers,
             checkPermissions,
             ...policyHandlers,
@@ -538,7 +559,11 @@ export class App {
                 throw new Error(`[ornate] Unhandled request method: ${actionMetadata.method}`);
         }
 
-        const authentication = actionMetadata.auth.map((p: IActionAuthMetadata) => colors.red(p.name));
+        // Get auth resolvers.
+        const authentication = actionMetadata.resolve
+            .filter((p: IActionResolveMetadata) => p.auth)
+            .map((p: IActionResolveMetadata) => colors.red(p.name));
+
         const authenticationString = authentication.length > 0 ? util.format("[%s]", authentication.join(", ")) : "";
 
         const permissions = this._auth !== undefined
@@ -577,8 +602,7 @@ export class App {
                 true
             );
 
-            req.auth = new Map<string, IAuthentication>();
-            req.resolved = new Map<string, any>();
+            req.session = new Map<string, any>();
 
             next();
 
@@ -600,8 +624,9 @@ export class App {
             return next();
         }
 
-        const authentication = actionMetadata.auth
-            .map((m: IActionAuthMetadata) => req.args[m.index] as IAuthentication)
+        const authentication = actionMetadata.resolve
+            .filter((m: IActionResolveMetadata) => m.auth)
+            .map((m: IActionResolveMetadata) => req.args[m.index] as IAuthentication)
             .filter((a: IAuthentication) => a !== undefined);
 
         const result = this._auth.checkRoutePermissions(
@@ -629,46 +654,19 @@ export class App {
         res.status(httpStatus.FORBIDDEN).send(message).end();
     }
 
-    private _bindAuthResolvers(
+    private _bindResolvers(
         moduleInstance: IModuleInstance,
         actionMetadata: IActionMetadata,
         actionName: string,
         actionRoute: string
     ): express.RequestHandler[] {
 
-        const authHandlers = actionMetadata.auth.map((authMetadata: IActionAuthMetadata) => {
-            const middlewareMetadata = Registry.getMiddlewareMetadata(authMetadata.service, authMetadata.name);
-            if (middlewareMetadata === undefined) {
-                this._logger.warn("[ornate] Auth middleware metadata not found for: %s (%s)", authMetadata.service.name, authMetadata.name);
-                return undefined;
-            }
-
-            const instance = this._getServiceInstance(moduleInstance, authMetadata.service);
-            const handler = middlewareMetadata.handler.bind(instance);
-            this._logger.trace("[ornate] · Auth: %s [%s]",
-                colors.green(middlewareMetadata.service),
-                colors.green(middlewareMetadata.name)
-            );
-
-            return this._handleAuth.bind(this, middlewareMetadata, actionMetadata, authMetadata, actionName, actionRoute, handler);
-        });
-
-        // Filter out undefined handlers.
-        return authHandlers.filter((handler: any) => handler !== undefined);
-    }
-
-    private _bindResourceResolvers(
-        moduleInstance: IModuleInstance,
-        actionMetadata: IActionMetadata,
-        actionName: string,
-        actionRoute: string
-    ): express.RequestHandler[] {
-
-        const resolveHandlers = actionMetadata.resolve.map((resourceMetadata: IActionResourceMetadata) => {
+        const resolveHandlers = actionMetadata.resolve.map((resourceMetadata: IActionResolveMetadata) => {
             const resolveMetadata = Registry.getMiddlewareMetadata(resourceMetadata.service, resourceMetadata.name);
             if (resolveMetadata === undefined) {
                 this._logger.warn(
-                    "[ornate] Middleware resolve metadata not found for: %s (%s)",
+                    "[ornate] %s middleware metadata not found for: %s (%s)",
+                    resourceMetadata.auth ? "Auth" : "Resolve",
                     resourceMetadata.service.name,
                     resourceMetadata.name
                 );
@@ -677,7 +675,8 @@ export class App {
 
             const instance = this._getServiceInstance(moduleInstance, resourceMetadata.service);
             const handler = resolveMetadata.handler.bind(instance);
-            this._logger.trace("[ornate] · Resolve: %s [%s]",
+            this._logger.trace("[ornate] · %s: %s [%s]",
+                resourceMetadata.auth ? "Auth" : "Resolve",
                 colors.green(resolveMetadata.service),
                 colors.green(resolveMetadata.name)
             );
@@ -697,20 +696,20 @@ export class App {
     ): express.RequestHandler[] {
 
         const policyHandlers = actionMetadata.policies.map((metadata: IActionPolicyMetadata) => {
-            const middleware = Registry.getMiddlewareMetadata(metadata.service, metadata.name);
-            if (middleware === undefined) {
-                this._logger.warn("[ornate] Resolve metadata not found for: %s (%s)", metadata.service.name, metadata.name);
+            const middlewareMetadata = Registry.getMiddlewareMetadata(metadata.service, metadata.name);
+            if (middlewareMetadata === undefined) {
+                this._logger.warn("[ornate] Policy middleware not found for: %s (%s)", metadata.service.name, metadata.name);
                 return undefined;
             }
 
             const instance = this._getServiceInstance(moduleInstance, metadata.service);
-            const handler = middleware.handler.bind(instance);
+            const handler = middlewareMetadata.handler.bind(instance);
             this._logger.trace("[ornate] · Policy: %s [%s]",
-                colors.green(middleware.service),
-                colors.green(middleware.name)
+                colors.green(middlewareMetadata.service),
+                colors.green(middlewareMetadata.name)
             );
 
-            return this._handlePolicy.bind(this, middleware, actionMetadata, metadata, actionName, actionRoute, handler);
+            return this._handlePolicy.bind(this, middlewareMetadata, actionMetadata, metadata, actionName, actionRoute, handler);
         });
 
         // Filter out undefined handlers.
@@ -762,59 +761,10 @@ export class App {
         return this._handleAction.bind(this, actionMetadata, actionName, actionRoute, handler);
     }
 
-    private async _handleAuth(
-        middlewareMetadata: IMiddlewareMetadata,
-        actionMetadata: IActionMetadata,
-        authMetadata: IActionAuthMetadata,
-        actionName: string,
-        actionRoute: string,
-        handler: MiddlewareHandler<IAuthentication>,
-        req: IAppRequest,
-        res: AppResponse,
-        next: express.NextFunction
-    ): Promise<void> {
-        try {
-            const args = this._handleArgs(
-                req,
-                res,
-                middlewareMetadata.handler.name,
-                actionMetadata.method,
-                actionRoute,
-                middlewareMetadata.args
-            );
-
-            this._handleResources(
-                req,
-                args,
-                middlewareMetadata.auth,
-                middlewareMetadata.resolve
-            );
-
-            const result = await handler(...args);
-
-            // Update action args.
-            req.args[authMetadata.index] = result;
-
-            req.auth.set(authMetadata.name, result);
-            next();
-
-        } catch (err) {
-            this._handleMiddlewareError(
-                res,
-                err,
-                middlewareMetadata.service,
-                middlewareMetadata.name,
-                actionName,
-                actionMetadata.method,
-                actionRoute
-            );
-        }
-    }
-
     private async _handleResolve(
         middlewareMetadata: IMiddlewareMetadata,
         actionMetadata: IActionMetadata,
-        resourceMetadata: IActionResourceMetadata,
+        resolveMetadata: IActionResolveMetadata,
         actionName: string,
         actionRoute: string,
         handler: MiddlewareHandler<any>,
@@ -823,10 +773,6 @@ export class App {
         next: express.NextFunction
     ): Promise<void> {
         try {
-            if (req.args.length <= resourceMetadata.index) {
-                throw new Error(`[ornate] Invalid resource: [${resourceMetadata.index}] ${resourceMetadata.name}`);
-            }
-
             const args = this._handleArgs(
                 req,
                 res,
@@ -836,22 +782,21 @@ export class App {
                 middlewareMetadata.args
             );
 
-            this._handleResources(
+            this._handleSessionResources(
                 req,
                 args,
-                middlewareMetadata.auth,
-                middlewareMetadata.resolve
+                middlewareMetadata.session
             );
 
-            const result = await handler(...args, req.args[resourceMetadata.index]);
-            if (result === undefined && resourceMetadata.required === true) {
-                throw new ParameterError(`[ornate] Could not resolve resource: ${resourceMetadata.name}`);
+            const result = await handler(...args, req.args[resolveMetadata.index]);
+            if (result === undefined && resolveMetadata.optional === false) {
+                throw new ParameterError(`[ornate] Could not resolve required resource: ${resolveMetadata.name}`);
             }
 
             // Update action args.
-            req.args[resourceMetadata.index] = result;
+            req.args[resolveMetadata.index] = result;
 
-            req.resolved.set(resourceMetadata.name, result);
+            req.session.set(resolveMetadata.name, result);
             next();
 
         } catch (err) {
@@ -879,7 +824,6 @@ export class App {
         next: express.NextFunction
     ): Promise<void> {
         try {
-
             const args = this._handleArgs(
                 req,
                 res,
@@ -889,11 +833,10 @@ export class App {
                 middlewareMetadata.args
             );
 
-            this._handleResources(
+            this._handleSessionResources(
                 req,
                 args,
-                middlewareMetadata.auth,
-                middlewareMetadata.resolve
+                middlewareMetadata.session
             );
 
             const result = await handler(...args, ...params);
@@ -941,11 +884,10 @@ export class App {
                 middlewareMetadata.args
             );
 
-            this._handleResources(
+            this._handleSessionResources(
                 req,
                 args,
-                middlewareMetadata.auth,
-                middlewareMetadata.resolve
+                middlewareMetadata.session
             );
 
             const result = await handler(...args, req.args[policyMetadata.index]);
@@ -1089,6 +1031,7 @@ export class App {
                 colors.red(err.name),
                 err.message
             );
+
             res.status(httpStatus.INTERNAL_SERVER_ERROR).end();
         }
     }
@@ -1130,7 +1073,8 @@ export class App {
             args[routeKey.index] = actionRoute;
         }
 
-        this._handleRequestSource(req.headers, args, argsMetadata.filter((am: IActionArgsMetadata) => am.type === EArgType.HEADER), true);
+        this._handleRequestSource(req.headers, args, argsMetadata.filter((am: IActionArgsMetadata) => am.type === EArgType.HEADER));
+        this._handleRequestSource(req.headers, args, argsMetadata.filter((am: IActionArgsMetadata) => am.type === EArgType.AUTHORIZATION));
         const bodyKeys = this._handleRequestSource(req.body, args, argsMetadata.filter((am: IActionArgsMetadata) => am.type === EArgType.BODY));
         const queryKeys = this._handleRequestSource(req.query, args, argsMetadata.filter((am: IActionArgsMetadata) => am.type === EArgType.QUERY));
         const paramKeys = this._handleRequestSource(req.params, args, argsMetadata.filter((am: IActionArgsMetadata) => am.type === EArgType.PARAM));
@@ -1144,50 +1088,46 @@ export class App {
         return args;
     }
 
-    private _handleResources(
-        req: IAppRequest,
-        args: any[],
-        authMetadata: IActionAuthMetadata[],
-        resolveMetadata: IActionResourceMetadata[]
-    ): void {
-        // Set auth resources.
-        for (const resource of authMetadata) {
-            const value = req.auth.get(resource.name);
-            if (value === undefined) {
-                throw new AuthenticationError(util.format("[ornate] Required auth parameter not found: %s", resource.name));
-            }
-
-            args[resource.index] = value;
-        }
-
-        // Set resolved resources.
-        for (const resource of resolveMetadata) {
-            const value = req.resolved.get(resource.name);
-            if (value === undefined && resource.required) {
-                throw new ParameterError(util.format("[ornate] Required resolved parameter not found: %s", resource.name));
-            }
-
-            args[resource.index] = value;
-        }
-    }
-
     private _handleRequestSource(
         source: {[key: string]: string | string[]},
         args: any[],
-        argsMetadata: IActionArgsMetadata[],
-        lowercase = false
+        argsMetadata: IActionArgsMetadata[]
     ): string[] {
         // Store the handled keys here.
         const keys = new Array<string>();
 
         // First, set the defined ones.
         for (const argMetadata of argsMetadata) {
-            const key = lowercase ? argMetadata.name.toLowerCase() : argMetadata.name;
+            let key: string = "";
+            switch (argMetadata.type) {
+                case EArgType.HEADER:
+                    key = argMetadata.name.toLowerCase();
+                    break;
+
+                case EArgType.AUTHORIZATION:
+                    key = AUTHORIZATION_HEADER;
+                    break;
+
+                default:
+                    key = argMetadata.name;
+            }
+
             if (argMetadata.required && (source === undefined || !source.hasOwnProperty(key))) {
                 throw new ParameterError(util.format("[ornate] Required %s argument not found: %s", argMetadata.type, argMetadata.name));
             }
 
-            args[argMetadata.index] = source[key];
+            if (argMetadata.type === EArgType.AUTHORIZATION) {
+                const match = (source[key] as string).match(AUTHORIZATION_HEADER_REGEX);
+                if (match === null || match[AUTHORIZATION_HEADER_REGEX_TYPE].toLowerCase() !== argMetadata.name) {
+                    throw new ParameterError(util.format("[ornate] Invalid authorization header: %s", source[key]));
+                }
+
+                args[argMetadata.index] = match[AUTHORIZATION_HEADER_REGEX_CREDENTIALS];
+
+            } else {
+                args[argMetadata.index] = source[key];
+            }
+
             keys.push(argMetadata.name);
         }
 
@@ -1203,6 +1143,22 @@ export class App {
             if (keys.indexOf(key) === -1) {
                 this._logger.warn("[ornate] Action: %s detected unhandled %s key: %s", action, name, key);
             }
+        }
+    }
+
+    private _handleSessionResources(
+        req: IAppRequest,
+        args: any[],
+        sessionResources: ISessionResourceMetadata[]
+    ): void {
+        // Set session resources.
+        for (const resource of sessionResources) {
+            const value = req.session.get(resource.name);
+            if (value === undefined && resource.required) {
+                throw new ParameterError(util.format("[ornate] Required session resource not found: %s", resource.name));
+            }
+
+            args[resource.index] = value;
         }
     }
 

@@ -17,6 +17,7 @@ import {
     Registry,
     EMiddlewareOrder,
     EArgType,
+    IAuthentication,
     IModuleMetadata,
     IModuleParameters,
     IServiceMetadata,
@@ -30,7 +31,8 @@ import {
     IActionArgsMetadata,
     ISessionResourceMetadata,
     ActionHandler,
-    MiddlewareHandler
+    MiddlewareHandler,
+    IAuthProvider
 } from "./decorators";
 
 import { ActionResponse } from "./responses";
@@ -89,36 +91,6 @@ interface IControllerType {
 
 type ControllerInstance = IControllerType & IControllerHandlers;
 
-export interface IRoute {
-    readonly method: ERequestMethod;
-    readonly path: string;
-}
-
-export interface IPermission {
-    readonly name: string;
-    readonly routes: IRoute[];
-}
-
-export interface IRole {
-    readonly name: string;
-    readonly permissions: IPermission[];
-}
-
-export interface IAuthenticatedUser {
-    readonly id?: string;
-    readonly name: string;
-    readonly roles: string[];
-}
-
-export interface IAuthentication {
-    readonly user: IAuthenticatedUser;
-}
-
-export interface IAuthorizationService {
-    findRoutePermissions(method: ERequestMethod, path: string): IPermission[];
-    checkRoutePermissions(auth: IAuthentication[], method: ERequestMethod, path: string): Promise<boolean>;
-}
-
 export interface IAuthorizationHeader {
     type: string;
     credentials: string;
@@ -140,7 +112,6 @@ export interface IBodyParserParams {
 }
 
 export interface IAppParams {
-    readonly auth?: IAuthorizationService;
     readonly logger?: ILogger;
     readonly modules: Array<IType<any>>;
     readonly parser?: IBodyParserParams;
@@ -161,20 +132,18 @@ export class App {
 
     private _modules: IModuleInstance[];
 
-    private _auth: IAuthorizationService;
     private _logger: ILogger;
 
     private MODULES = new Map<IType<any>, any>();
     private SERVICES = new Map<IType<any>, IServiceInstance>();
     private MIGRATIONS = new Map<string, IMigrationInstance>();
+    private AUTH_PROVIDERS = new Array<IAuthProvider>();
 
     constructor(params: IAppParams) {
         this._modules = new Array<IModuleInstance>();
 
         this._expressApp = express();
         this._expressRouter = express.Router();
-
-        this._auth = params.auth;
 
         if (params.logger !== undefined) {
             this._logger = params.logger;
@@ -199,8 +168,12 @@ export class App {
 
         this._httpServer = http.createServer(this._expressApp);
 
-        for (const targetModule of params.modules) {
-            this._registerModule(targetModule);
+        try {
+            for (const targetModule of params.modules) {
+                this._registerModule(targetModule);
+            }
+        } catch (err) {
+            console.error(err);
         }
 
         // For health checks.
@@ -411,6 +384,13 @@ export class App {
             }
         }
 
+        if (moduleMetadata.params !== undefined && moduleMetadata.params.auth !== undefined) {
+            for (const targetService of moduleMetadata.params.auth) {
+                const service = this._getServiceInstance(moduleInstance, targetService) as IAuthProvider;
+                this.AUTH_PROVIDERS.push(service);
+            }
+        }
+
         this._modules.push(moduleInstance);
     }
 
@@ -566,12 +546,6 @@ export class App {
 
         const authenticationString = authentication.length > 0 ? util.format("[%s]", authentication.join(", ")) : "";
 
-        const permissions = this._auth !== undefined
-            ? this._auth.findRoutePermissions(actionMetadata.method, actionRoute).map((p: IPermission) => colors.green(p.name))
-            : [];
-
-        const permissionsString = permissions.length > 0 ? util.format("[%s]", permissions.join(", ")) : "";
-
         const policies = actionMetadata.policies.map((p: IActionPolicyMetadata) => colors.magenta(p.name));
         const policiesString = policies.length > 0 ? util.format("[%s]", policies.join(", ")) : "";
 
@@ -579,8 +553,12 @@ export class App {
             colors.cyan(actionName),
             colors.italic(actionMetadata.method.toLowerCase()),
             colors.yellow(actionRoute),
-            [authenticationString, permissionsString, policiesString].filter((str: string) => str !== "").join(" ")
+            [authenticationString, policiesString].filter((str: string) => str !== "").join(" ")
         );
+    }
+
+    private _checkRoutePermissions(auth: IAuthentication[], method: ERequestMethod, path: string): boolean {
+        return this.AUTH_PROVIDERS.some((p: IAuthProvider) => p.checkRoutePermissions(auth, method, path));
     }
 
     private _initialiseAction(
@@ -620,7 +598,7 @@ export class App {
         res: AppResponse,
         next: express.NextFunction
     ): void {
-        if (this._auth === undefined) {
+        if (this.AUTH_PROVIDERS.length === 0) {
             return next();
         }
 
@@ -629,11 +607,7 @@ export class App {
             .map((m: IActionResolveMetadata) => req.args[m.index] as IAuthentication)
             .filter((a: IAuthentication) => a !== undefined);
 
-        const result = this._auth.checkRoutePermissions(
-            authentication,
-            actionMetadata.method,
-            actionRoute
-        );
+        const result = this._checkRoutePermissions(authentication, actionMetadata.method, actionRoute);
 
         if (result) {
             return next();
@@ -1193,6 +1167,8 @@ export class App {
     }
 
     private _newInstance<T>(moduleInstance: IModuleInstance, target: IType<T>): any {
+        // @TODO: This will fail on a circular dependency, with a cryptic error.
+        // Detect those by analysing what we're instantiating.
         const params = Reflect.getOwnMetadata("design:paramtypes", target);
         const constructor = params === undefined || params.length === 0
                           ? target

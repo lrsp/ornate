@@ -93,6 +93,28 @@ export type ActionHandler<T> = (...args: any[]) => Promise<ActionResponse<T>>;
 export type MiddlewareHandler<T> = (...args: any[]) => Promise<T>;
 export type IType<T> = new (...args: any[]) => T;
 export type AnyType = IType<any>;
+export interface IRoute {
+    readonly method: ERequestMethod;
+    readonly path: string;
+}
+export interface IPermission {
+    readonly name: string;
+    readonly routes: IRoute[];
+}
+export interface IRole {
+    readonly name: string;
+    readonly permissions: IPermission[];
+}
+export interface IAuthentication {
+    readonly user: {
+        readonly id?: any;
+        readonly name: string;
+    };
+    readonly roles: IRole[];
+}
+export interface IAuthProvider {
+    checkRoutePermissions(auth: IAuthentication[], method: ERequestMethod, path: string): boolean;
+}
 export interface IProviderParameters {
     readonly provides: any;
     readonly service: IType<any>;
@@ -105,6 +127,7 @@ export interface IModuleParameters {
     readonly migrations?: AnyType[];
     readonly providers?: IProviderParameters[];
     readonly controllers?: AnyType[];
+    readonly auth?: Array<IType<IAuthProvider>>;
 }
 export interface IModuleMetadata {
     readonly name: string;
@@ -238,30 +261,6 @@ interface IMigrationInstance {
     up(): Promise<void>;
     down(): Promise<void>;
 }
-export interface IRoute {
-    readonly method: ERequestMethod;
-    readonly path: string;
-}
-export interface IPermission {
-    readonly name: string;
-    readonly routes: IRoute[];
-}
-export interface IRole {
-    readonly name: string;
-    readonly permissions: IPermission[];
-}
-export interface IAuthenticatedUser {
-    readonly id?: string;
-    readonly name: string;
-    readonly roles: string[];
-}
-export interface IAuthentication {
-    readonly user: IAuthenticatedUser;
-}
-export interface IAuthorizationService {
-    findRoutePermissions(method: ERequestMethod, path: string): IPermission[];
-    checkRoutePermissions(auth: IAuthentication[], method: ERequestMethod, path: string): Promise<boolean>;
-}
 export interface IAuthorizationHeader {
     readonly type: string;
     readonly credentials: string;
@@ -280,7 +279,6 @@ export interface IBodyParserParams {
     readonly urlencoded?: bodyParser.OptionsUrlencoded;
 }
 export interface IAppParams {
-    readonly auth?: IAuthorizationService;
     readonly logger?: ILogger;
     readonly modules: Array<IType<any>>;
     readonly parser?: IBodyParserParams;

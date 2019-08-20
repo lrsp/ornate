@@ -1,6 +1,6 @@
 {
   "name": "ornatejs",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "A decorator library to build node apps using express and dependency injection",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

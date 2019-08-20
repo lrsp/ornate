@@ -17,7 +17,6 @@ import {
     Registry,
     EMiddlewareOrder,
     EArgType,
-    IAuthentication,
     IModuleMetadata,
     IModuleParameters,
     IServiceMetadata,
@@ -557,7 +556,7 @@ export class App {
         );
     }
 
-    private _checkRoutePermissions(auth: IAuthentication[], method: ERequestMethod, path: string): boolean {
+    private _checkRoutePermissions(auth: any[], method: ERequestMethod, path: string): boolean {
         return this.AUTH_PROVIDERS.some((p: IAuthProvider) => p.checkRoutePermissions(auth, method, path));
     }
 
@@ -604,8 +603,8 @@ export class App {
 
         const authentication = actionMetadata.resolve
             .filter((m: IActionResolveMetadata) => m.auth)
-            .map((m: IActionResolveMetadata) => req.args[m.index] as IAuthentication)
-            .filter((a: IAuthentication) => a !== undefined);
+            .map((m: IActionResolveMetadata) => req.args[m.index])
+            .filter((a: any) => a !== undefined);
 
         const result = this._checkRoutePermissions(authentication, actionMetadata.method, actionRoute);
 
@@ -613,8 +612,7 @@ export class App {
             return next();
         }
 
-        const users = authentication.map((a: IAuthentication) => util.format("[%s] %s", a.user.id, a.user.name));
-        const message = util.format("[ornate] Unauthorized user action: %s", users.join(", "));
+        const message = "Unauthorized user action";
 
         this._logger.error(
             "%s [%s %s] %s: %s",

@@ -93,27 +93,8 @@ export type ActionHandler<T> = (...args: any[]) => Promise<ActionResponse<T>>;
 export type MiddlewareHandler<T> = (...args: any[]) => Promise<T>;
 export type IType<T> = new (...args: any[]) => T;
 export type AnyType = IType<any>;
-export interface IRoute {
-    readonly method: ERequestMethod;
-    readonly path: string;
-}
-export interface IPermission {
-    readonly name: string;
-    readonly routes: IRoute[];
-}
-export interface IRole {
-    readonly name: string;
-    readonly permissions: IPermission[];
-}
-export interface IAuthentication {
-    readonly user: {
-        readonly id?: any;
-        readonly name: string;
-    };
-    readonly roles: IRole[];
-}
 export interface IAuthProvider {
-    checkRoutePermissions(auth: IAuthentication[], method: ERequestMethod, path: string): boolean;
+    checkRoutePermissions(auth: any[], method: ERequestMethod, path: string): boolean;
 }
 export interface IProviderParameters {
     readonly provides: any;

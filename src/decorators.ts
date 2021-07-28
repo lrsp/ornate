@@ -4,16 +4,64 @@ import { ActionResponse } from "./responses";
 const MODULE = Symbol("app:module");
 const SERVICE = Symbol("app:service");
 const MIGRATION = Symbol("app:migration");
-const INJECTABLES = Symbol("service:injectable");
-const PROPERTY = Symbol("service:property");
 const CONTROLLER = Symbol("app:controller");
 const MIDDLEWARES = Symbol("app:middlewares");
+const MIDDLEWARE_AUTHENTICATION = Symbol("app:middleware:authentication");
+const MIDDLEWARE_RESOLVER = Symbol("app:middleware:resolver");
+const MIDDLEWARE_POLICY = Symbol("app:middleware:policies");
+const MIDDLEWARE_GENERIC = Symbol("app:middleware:generic");
 const ACTIONS = Symbol("controller:actions");
-const ACTION_MIDDLEWARES = Symbol("action:middlewares");
-const ACTION_ARGS = Symbol("action:args");
-const ACTION_RESOLVE = Symbol("action:resolve");
-const ACTION_POLICY = Symbol("action:policy");
-const SESSION_RESOURCE = Symbol("session:resource");
+const RESOURCE_ARG = Symbol("resource:args");
+const RESOURCE_RESOLVER = Symbol("resource:resolver");
+const RESOURCE_VALIDATOR = Symbol("resource:validator");
+const RESOURCE_INJECTABLE = Symbol("resource:injectable");
+
+interface ISuiteDefinition<T> {
+    readonly Type: TType<T>;
+    readonly title: string;
+    readonly run: boolean;
+}
+
+interface ISuiteFunction<T, U> {
+    readonly type: ESuiteFunctionType;
+    readonly SuiteType: TType<T>;
+    readonly title: string;
+    readonly func: (...args: any[]) => U;
+    readonly run: boolean;
+}
+
+interface ISuiteStub<T, U> {
+    readonly SuiteType: TType<T>;
+    readonly StubType: TType<U>;
+    readonly index: number;
+}
+
+interface ISuiteRouter<T> {
+    readonly SuiteType: TType<T>;
+    readonly index: number;
+}
+
+interface IServiceStubDefinition<T, U> {
+    readonly RealType: TType<T>;
+    readonly StubType: TType<U>;
+    instance?: U;
+    fakes: sinon.SinonStub<any>[];
+}
+
+interface IServiceFakeDefinition<T, U> {
+    readonly StubType: TType<T>;
+    readonly name: string;
+    readonly func: (...args: any[]) => U;
+    readonly auto: boolean;
+}
+
+export const enum ESuiteFunctionType {
+    BEFORE_ALL = "before-all",
+    BEFORE_EACH = "before-each",
+    AFTER_ALL = "after-all",
+    AFTER_EACH = "after-each",
+    TEST = "test"
+}
 
 export const enum EMiddlewareOrder {
     BEFORE = "before",
@@ -21,17 +69,17 @@ export const enum EMiddlewareOrder {
 }
 
 export const enum EArgType {
-    REQUEST = "request",
-    RESPONSE = "response",
+    CONTEXT = "context",
+    AUTHENTICATION = "authentication",
+    STATE = "state",
     HOST = "host",
     HOSTNAME = "hostname",
     HEADER = "header",
-    AUTHORIZATION = "authorization",
+    METHOD = "method",
+    ROUTE = "route",
     BODY = "body",
     PARAM = "param",
-    QUERY = "query",
-    METHOD = "method",
-    ROUTE = "route"
+    QUERY = "query"
 }
 
 export const enum ERequestMethod {
@@ -44,40 +92,37 @@ export const enum ERequestMethod {
     PATCH = "PATCH"
 }
 
-export const enum EPropertyType {
-    HTTP_SERVER = 0
-}
-
 export const enum EInjectableType {
-    HTTP_SERVER = 0
+    INJECTOR = 0,
+    HTTP_SERVER = 1
 }
 
-export type ActionHandler<T> = (...args: any[]) => Promise<ActionResponse<T>>;
+export const VALID_REQUEST_METHODS = [
+    ERequestMethod.GET,
+    ERequestMethod.POST,
+    ERequestMethod.PUT,
+    ERequestMethod.DELETE
+];
 
-export type MiddlewareHandler<T> = (...args: any[]) => Promise<T>;
+export type TMiddlewareHandler<T> = (...args: any[]) => Promise<T>;
 
-export type IType<T> = new (...args: any[]) => T;
+export type TActionHandler<T> = (...args: any[]) => Promise<ActionResponse<T>>;
 
-export type AnyType = IType<any>;
-
-export interface IAuthProvider {
-    checkRoutePermissions(auth: any[], method: ERequestMethod, path: string): boolean;
-}
+export type TType<T> = new (...args: any[]) => T;
 
 export interface IProviderParameters {
     readonly provides: any;
-    readonly service: IType<any>;
+    readonly service: TType<any>;
 }
 
 export interface IModuleParameters {
     readonly route?: string;
-    readonly modules?: AnyType[];
-    readonly services?: AnyType[];
-    readonly initialize?: AnyType[];
-    readonly migrations?: AnyType[];
+    readonly modules?: TType<any>[];
+    readonly services?: TType<any>[];
     readonly providers?: IProviderParameters[];
-    readonly controllers?: AnyType[];
-    readonly auth?: Array<IType<IAuthProvider>>;
+    readonly initialize?: TType<any>[];
+    readonly migrations?: TType<any>[];
+    readonly controllers?: TType<any>[];
 }
 
 export interface IModuleMetadata {
@@ -87,7 +132,6 @@ export interface IModuleMetadata {
 
 export interface IServiceMetadata {
     readonly name: string;
-    readonly properties: IPropertyMetadata[];
     readonly middlewares: IMiddlewareMetadata[];
 }
 
@@ -105,387 +149,588 @@ export interface IProviderMetadata {
     readonly index: number;
 }
 
-export interface IPropertyMetadata {
-    type: EPropertyType;
-    name: string;
-}
-
-export interface IMiddlewareMetadata {
-    readonly service: string;
-    readonly name: string;
-    readonly handler: MiddlewareHandler<any>;
-    readonly args: IActionArgsMetadata[];
-    readonly session: ISessionResourceMetadata[];
-}
-
 export interface IControllerMetadata {
     readonly name: string;
     readonly route: string;
     readonly actions: IActionMetadata[];
 }
 
-export interface IActionMetadata {
-    readonly target: IType<any>;
-    readonly method: ERequestMethod;
-    readonly route: string;
-    readonly handler: ActionHandler<any>;
-    readonly args: IActionArgsMetadata[];
-    readonly resolve: IActionResolveMetadata[];
-    readonly policies: IActionPolicyMetadata[];
+export interface IActionAuthenticationMetadata {
+    readonly service: TType<any>;
+    readonly name: string;
+    readonly params: any[];
 }
 
-export interface IActionMiddlewareMetadata {
-    readonly service: IType<any>;
+export interface IActionAuthorizationMetadata {
+    readonly service: TType<any>;
+    readonly name: string;
+    readonly params: any[];
+}
+
+export interface IActionGenericMetadata {
+    readonly service: TType<any>;
     readonly order: EMiddlewareOrder;
     readonly name: string;
     readonly params: any[];
 }
 
-export interface IActionArgsMetadata {
+export interface IResourceArgMetadata {
     readonly type: EArgType;
     readonly index: number;
     readonly name: string;
     readonly required: boolean;
 }
 
-export interface IActionResolveMetadata {
-    readonly service: IType<any>;
+export interface IResourceResolverMetadata {
+    readonly service: TType<any>;
     readonly index: number;
     readonly name: string;
-    readonly auth: boolean;
     readonly optional: boolean;
 }
 
-export interface ISessionResourceMetadata {
+export interface IResourceValidatorMetadata {
+    readonly service: TType<any>;
     readonly index: number;
     readonly name: string;
-    readonly required: boolean;
 }
 
-export interface IActionPolicyMetadata {
-    readonly service: IType<any>;
-    readonly index: number;
+export interface IMiddlewareMetadata {
+    readonly target: TType<any>;
+    readonly type: symbol;
     readonly name: string;
+    readonly handler: TMiddlewareHandler<any>;
+    readonly args: IResourceArgMetadata[];
+    readonly resolvers: IResourceResolverMetadata[];
+    readonly validators: IResourceValidatorMetadata[];
+}
+
+export interface IActionMetadata {
+    readonly target: TType<any>;
+    readonly method: ERequestMethod;
+    readonly route: string;
+    readonly handler: TActionHandler<any>;
+    readonly authentication: IActionAuthenticationMetadata[];
+    readonly authorization: IActionAuthorizationMetadata[];
+    readonly generics: IActionGenericMetadata[];
+    readonly args: IResourceArgMetadata[];
+    readonly resolvers: IResourceResolverMetadata[];
+    readonly validators: IResourceValidatorMetadata[];
 }
 
 export function Module(params?: IModuleParameters) {
-    return (target: IType<any>): void => {
-        Registry.defineModule(target, params);
+    return (target: TType<any>): void => {
+        AppRegistry.defineModule(target, params);
     };
 }
 
 export function Service() {
-    return <T>(target: IType<T>): void => {
-        Registry.defineService(target);
+    return <T>(target: TType<T>): void => {
+        AppRegistry.defineService(target);
     };
 }
 
 export function Migration(name: string) {
-    return <T>(target: IType<T>): void => {
-        Registry.defineMigration(target, name);
+    return <T>(target: TType<T>): void => {
+        AppRegistry.defineMigration(target, name);
     };
 }
 
 export function Controller(route: string) {
-    return <T>(target: IType<T>): void => {
-        Registry.defineController(target, route);
+    return <T>(target: TType<T>): void => {
+        AppRegistry.defineController(target, route);
     };
 }
 
-export function HttpServer() {
-    return (target: any, handler: string, index: number): void => {
-        Registry.defineInjectable(target, EInjectableType.HTTP_SERVER, index);
-    };
-}
-
-export function Middleware(name: string) {
+export function Authentication(name: string) {
     return (target: any, handler: string, descriptor: PropertyDescriptor): void => {
-        Registry.defineMiddleware(target.constructor, name, descriptor.value);
+        AppRegistry.defineMiddleware(MIDDLEWARE_AUTHENTICATION, target.constructor, name, descriptor.value);
+    };
+}
+
+export function Resolver(name: string) {
+    return (target: any, handler: string, descriptor: PropertyDescriptor): void => {
+        AppRegistry.defineMiddleware(MIDDLEWARE_RESOLVER, target.constructor, name, descriptor.value);
+    };
+}
+
+export function Policy(name: string) {
+    return (target: any, handler: string, descriptor: PropertyDescriptor): void => {
+        AppRegistry.defineMiddleware(MIDDLEWARE_POLICY, target.constructor, name, descriptor.value);
+    };
+}
+
+export function Generic(name: string) {
+    return (target: any, handler: string, descriptor: PropertyDescriptor): void => {
+        AppRegistry.defineMiddleware(MIDDLEWARE_GENERIC, target.constructor, name, descriptor.value);
     };
 }
 
 export function Get(route: string) {
     return (target: any, handler: string, descriptor: PropertyDescriptor): void => {
-        Registry.defineAction(target.constructor, ERequestMethod.GET, route, descriptor.value);
+        AppRegistry.defineAction(target.constructor, ERequestMethod.GET, route, descriptor.value);
     };
 }
 
 export function Post(route: string) {
     return (target: any, handler: string, descriptor: PropertyDescriptor): void => {
-        Registry.defineAction(target.constructor, ERequestMethod.POST, route, descriptor.value);
+        AppRegistry.defineAction(target.constructor, ERequestMethod.POST, route, descriptor.value);
     };
 }
 
 export function Put(route: string) {
     return (target: any, handler: string, descriptor: PropertyDescriptor): void => {
-        Registry.defineAction(target.constructor, ERequestMethod.PUT, route, descriptor.value);
+        AppRegistry.defineAction(target.constructor, ERequestMethod.PUT, route, descriptor.value);
     };
 }
 
 export function Delete(route: string) {
     return (target: any, handler: string, descriptor: PropertyDescriptor): void => {
-        Registry.defineAction(target.constructor, ERequestMethod.DELETE, route, descriptor.value);
+        AppRegistry.defineAction(target.constructor, ERequestMethod.DELETE, route, descriptor.value);
     };
 }
 
-export function Before<T>(service: IType<T>, name: string, ...params: any[]) {
+export function Authenticate<T>(service: TType<T>, name: string, ...params: any[]) {
     return (target: any, handler: string, descriptor: PropertyDescriptor): void => {
-        Registry.defineActionMiddleware(target.constructor, EMiddlewareOrder.BEFORE, service, name, params, descriptor.value);
+        AppRegistry.defineActionAuthentication(target.constructor, service, name, params, descriptor.value);
     };
 }
 
-export function After<T>(service: IType<T>, name: string, ...params: any[]) {
+export function Authorize<T>(service: TType<T>, name: string, ...params: any[]) {
     return (target: any, handler: string, descriptor: PropertyDescriptor): void => {
-        Registry.defineActionMiddleware(target.constructor, EMiddlewareOrder.AFTER, service, name, params, descriptor.value);
+        AppRegistry.defineActionAuthorization(target.constructor, service, name, params, descriptor.value);
     };
 }
 
-export function Auth<T>(service: IType<T>, name: string, required?: boolean) {
-    return (target: any, handler: string, index: number): void => {
-        Registry.defineResolver(target.constructor, handler, index, service, name, true, required === false);
+export function Before<T>(service: TType<T>, name: string, ...params: any[]) {
+    return (target: any, handler: string, descriptor: PropertyDescriptor): void => {
+        AppRegistry.defineActionGeneric(target.constructor, EMiddlewareOrder.BEFORE, service, name, params, descriptor.value);
     };
 }
 
-export function Resolve<T>(service: IType<T>, name: string, required?: boolean) {
-    return (target: any, handler: string, index: number): void => {
-        Registry.defineResolver(target.constructor, handler, index, service, name, false, required === false);
+export function After<T>(service: TType<T>, name: string, ...params: any[]) {
+    return (target: any, handler: string, descriptor: PropertyDescriptor): void => {
+        AppRegistry.defineActionGeneric(target.constructor, EMiddlewareOrder.AFTER, service, name, params, descriptor.value);
     };
 }
 
-export function Policy<T>(service: IType<T>, name: string) {
+export function Context() {
     return (target: any, handler: string, index: number): void => {
-        Registry.definePolicy(target.constructor, handler, index, service, name);
+        AppRegistry.defineResourceArg(target.constructor, EArgType.CONTEXT, handler, index, "context", true);
     };
 }
 
-export function Session(name: string, required?: boolean) {
+export function State() {
     return (target: any, handler: string, index: number): void => {
-        Registry.defineSessionResource(target.constructor, handler, index, name, required === true);
-    };
-}
-
-export function Req() {
-    return (target: any, handler: string, index: number): void => {
-        Registry.defineActionArg(target.constructor, EArgType.REQUEST, handler, index, "request", true);
-    };
-}
-
-export function Res() {
-    return (target: any, handler: string, index: number): void => {
-        Registry.defineActionArg(target.constructor, EArgType.RESPONSE, handler, index, "response", true);
+        AppRegistry.defineResourceArg(target.constructor, EArgType.STATE, handler, index, "state", true);
     };
 }
 
 export function Host() {
     return (target: any, handler: string, index: number): void => {
-        Registry.defineActionArg(target.constructor, EArgType.HOST, handler, index, "host", true);
+        AppRegistry.defineResourceArg(target.constructor, EArgType.HOST, handler, index, "host", true);
     };
 }
 
 export function Hostname() {
     return (target: any, handler: string, index: number): void => {
-        Registry.defineActionArg(target.constructor, EArgType.HOSTNAME, handler, index, "hostname", true);
+        AppRegistry.defineResourceArg(target.constructor, EArgType.HOSTNAME, handler, index, "hostname", true);
     };
 }
 
 export function Header(name: string, required?: boolean) {
     return (target: any, handler: string, index: number): void => {
-        Registry.defineActionArg(target.constructor, EArgType.HEADER, handler, index, name, required === true);
-    };
-}
-
-export function Authorization(type: string, required?: boolean) {
-    return (target: any, handler: string, index: number): void => {
-        Registry.defineActionArg(target.constructor, EArgType.AUTHORIZATION, handler, index, type, required === true);
-    };
-}
-
-export function Body(name: string, required?: boolean) {
-    return (target: any, handler: string, index: number): void => {
-        Registry.defineActionArg(target.constructor, EArgType.BODY, handler, index, name, required === true);
-    };
-}
-
-export function Param(name: string, required?: boolean) {
-    return (target: any, handler: string, index: number): void => {
-        Registry.defineActionArg(target.constructor, EArgType.PARAM, handler, index, name, required === true);
-    };
-}
-
-export function Query(name: string, required?: boolean) {
-    return (target: any, handler: string, index: number): void => {
-        Registry.defineActionArg(target.constructor, EArgType.QUERY, handler, index, name, required === true);
+        AppRegistry.defineResourceArg(target.constructor, EArgType.HEADER, handler, index, name.toLowerCase(), required === true);
     };
 }
 
 export function Method() {
     return (target: any, handler: string, index: number): void => {
-        Registry.defineActionArg(target.constructor, EArgType.METHOD, handler, index, "method", true);
+        AppRegistry.defineResourceArg(target.constructor, EArgType.METHOD, handler, index, "method", true);
     };
 }
 
 export function Route() {
     return (target: any, handler: string, index: number): void => {
-        Registry.defineActionArg(target.constructor, EArgType.ROUTE, handler, index, "route", true);
+        AppRegistry.defineResourceArg(target.constructor, EArgType.ROUTE, handler, index, "route", true);
     };
 }
 
-export class Registry {
+export function Body(name: string, required?: boolean) {
+    return (target: any, handler: string, index: number): void => {
+        AppRegistry.defineResourceArg(target.constructor, EArgType.BODY, handler, index, name, required === true);
+    };
+}
 
-    public static defineProperty(target: any, name: string, type: EPropertyType): void {
-        let properties = Reflect.getMetadata(PROPERTY, target);
-        if (properties === undefined) {
-            properties = new Array<string>();
-            Reflect.defineMetadata(PROPERTY, properties, target);
-        }
+export function Param(name: string, required?: boolean) {
+    return (target: any, handler: string, index: number): void => {
+        AppRegistry.defineResourceArg(target.constructor, EArgType.PARAM, handler, index, name, required === true);
+    };
+}
 
-        const metadata: IPropertyMetadata = {
-            type,
+export function Query(name: string, required?: boolean) {
+    return (target: any, handler: string, index: number): void => {
+        AppRegistry.defineResourceArg(target.constructor, EArgType.QUERY, handler, index, name, required === true);
+    };
+}
+
+export function Resolve<T>(service: TType<T>, name: string, required?: boolean) {
+    return (target: any, handler: string, index: number): void => {
+        AppRegistry.defineResourceResolver(target.constructor, handler, index, service, name, required === false);
+    };
+}
+
+export function Validate<T>(service: TType<T>, name: string) {
+    return (target: any, handler: string, index: number): void => {
+        AppRegistry.defineResourceValidator(target.constructor, handler, index, service, name);
+    };
+}
+
+export function Injector() {
+    return (target: any, handler: string, index: number): void => {
+        AppRegistry.defineResourceInjectable(target, EInjectableType.INJECTOR, index);
+    };
+}
+
+export function HttpServer() {
+    return (target: any, handler: string, index: number): void => {
+        AppRegistry.defineResourceInjectable(target, EInjectableType.HTTP_SERVER, index);
+    };
+}
+
+export function ServiceStub<T>(RealType: TType<T>) {
+    return <U>(StubType: TType<U>): void => {
+        TestRegistry.declareServiceStub(RealType, StubType);
+    };
+}
+
+export function Fake(auto?: boolean) {
+    return (StubType: any, handler: string, descriptor: PropertyDescriptor): void => {
+        TestRegistry.declareServiceStubFake(StubType.constructor, handler, descriptor.value, auto === true);
+    };
+}
+
+export function TestSuite(title: string, run = true) {
+    return <T>(Type: TType<T>): void => {
+        TestRegistry.declareTestSuite(Type, title, run);
+    };
+}
+
+export function Stub<T, U>(StubType: TType<U>) {
+    return (SuiteType: TType<T>, handler: string, index: number): void => {
+        TestRegistry.declareTestSuiteStub(SuiteType, StubType, index);
+    };
+}
+
+export function BeforeAll(title: string, run = true) {
+    return (StubType: any, handler: string, descriptor: PropertyDescriptor): void => {
+        TestRegistry.declareTestSuiteFunc(StubType.constructor, ESuiteFunctionType.BEFORE_ALL, title, descriptor.value, run);
+    };
+}
+
+export function BeforeEach(title: string, run = true) {
+    return (StubType: any, handler: string, descriptor: PropertyDescriptor): void => {
+        TestRegistry.declareTestSuiteFunc(StubType.constructor, ESuiteFunctionType.BEFORE_EACH, title, descriptor.value, run);
+    };
+}
+
+export function AfterAll(title: string, run = true) {
+    return (StubType: any, handler: string, descriptor: PropertyDescriptor): void => {
+        TestRegistry.declareTestSuiteFunc(StubType.constructor, ESuiteFunctionType.AFTER_ALL, title, descriptor.value, run);
+    };
+}
+
+export function AfterEach(title: string, run = true) {
+    return (StubType: any, handler: string, descriptor: PropertyDescriptor): void => {
+        TestRegistry.declareTestSuiteFunc(StubType.constructor, ESuiteFunctionType.AFTER_EACH, title, descriptor.value, run);
+    };
+}
+
+export function Test(title: string, run = true) {
+    return (StubType: any, handler: string, descriptor: PropertyDescriptor): void => {
+        TestRegistry.declareTestSuiteFunc(StubType.constructor, ESuiteFunctionType.TEST , title, descriptor.value, run);
+    };
+}
+
+export function TestRouter<T>() {
+    return (SuiteType: TType<T>, handler: string, index: number): void => {
+        TestRegistry.declareTestRouter(SuiteType, index);
+    };
+}
+
+export class AppRegistry {
+
+    public static defineModule<T>(targetModule: TType<T>, params: IModuleParameters): void {
+        const metadata: IModuleMetadata = {
+            name: targetModule.name,
+            params
+        };
+
+        // Save target module metadata.
+        Reflect.defineMetadata(MODULE, metadata, targetModule);
+    }
+
+    public static defineService<T>(targetService: TType<T>): void {
+        const middlewares = Reflect.getMetadata(MIDDLEWARES, targetService) as IMiddlewareMetadata[];
+
+        const metadata: IServiceMetadata = {
+            name: targetService.name,
+            middlewares
+        };
+
+        // Save target service metadata.
+        Reflect.defineMetadata(SERVICE, metadata, targetService);
+    }
+
+    public static defineMigration<T>(targetMigration: TType<T>, name: string): void {
+        const metadata: IMigrationMetadata = {
             name
         };
 
-        properties.push(metadata);
+        Reflect.defineMetadata(MIGRATION, metadata, targetMigration);
     }
 
-    public static defineModule<T>(targetModule: IType<T>, params: IModuleParameters): void {
-        this._setModuleMetadata(targetModule, params);
-    }
-
-    public static defineService<T>(targetService: IType<T>): void {
-        const middlewares = Reflect.getMetadata(MIDDLEWARES, targetService) as IMiddlewareMetadata[];
-        const properties = Reflect.getMetadata(PROPERTY, targetService) as IPropertyMetadata[];
-
-        this._setServiceMetadata(targetService, properties, middlewares);
-    }
-
-    public static defineMigration<T>(targetMigration: IType<T>, name: string): void {
-        this._setMigrationMetadata(targetMigration, name);
-    }
-
-    public static defineController(targetController: IType<any>, route: string): void {
+    public static defineController(targetController: TType<any>, route: string): void {
         const actions = Reflect.getMetadata(ACTIONS, targetController) as IActionMetadata[];
 
-        this._setControllerMetadata(targetController, route, actions);
+        const metadata: IControllerMetadata = {
+            name: targetController.name,
+            route,
+            actions
+        };
+
+        // Save target controller metadata.
+        Reflect.defineMetadata(CONTROLLER, metadata, targetController);
     }
 
-    public static defineInjectable(target: IType<any>, type: EInjectableType, index: number): void {
-        let injectables = Reflect.getMetadata(INJECTABLES, target);
-        if (injectables === undefined) {
-            injectables = new Array<IProviderMetadata>();
-            Reflect.defineMetadata(INJECTABLES, injectables, target);
-        }
-
-        this._addInjectableMetadata(injectables, type, index);
-    }
-
-    public static defineMiddleware(targetService: IType<any>, name: string, handler: MiddlewareHandler<any>): void {
+    public static defineMiddleware(type: symbol, targetService: TType<any>, name: string, handler: TMiddlewareHandler<any>): void {
         let middlewares = Reflect.getMetadata(MIDDLEWARES, targetService) as IMiddlewareMetadata[];
         if (middlewares === undefined) {
             middlewares = new Array<IMiddlewareMetadata>();
             Reflect.defineMetadata(MIDDLEWARES, middlewares, targetService);
         }
 
-        this._addMiddlewareMetadata(middlewares, targetService, name, handler);
+        // Get resource metadata.
+        const args = Reflect.getMetadata(RESOURCE_ARG, targetService, handler.name);
+        const resolvers = Reflect.getMetadata(RESOURCE_RESOLVER, targetService, handler.name);
+        const validators = Reflect.getMetadata(RESOURCE_VALIDATOR, targetService, handler.name);
+
+        const metadata: IMiddlewareMetadata = {
+            target: targetService,
+            type,
+            name,
+            handler,
+            args: args !== undefined ? args : [],
+            resolvers: resolvers !== undefined ? resolvers : [],
+            validators: validators !== undefined ? validators : []
+        };
+
+        // Add middleware to array.
+        middlewares.push(metadata);
     }
 
-    public static defineAction(targetController: IType<any>, method: ERequestMethod, route: string, handler: ActionHandler<any>): void {
+    public static defineAction(targetController: TType<any>, method: ERequestMethod, route: string, handler: TActionHandler<any>): void {
         let actions = Reflect.getMetadata(ACTIONS, targetController) as IActionMetadata[];
         if (actions === undefined) {
             actions = new Array<IActionMetadata>();
             Reflect.defineMetadata(ACTIONS, actions, targetController);
         }
 
-        this._addActionMetadata(actions, targetController, method, route, handler);
+        // Get resource metadata.
+        const args = Reflect.getMetadata(RESOURCE_ARG, targetController, handler.name);
+        const resolvers = Reflect.getMetadata(RESOURCE_RESOLVER, targetController, handler.name);
+        const validators = Reflect.getMetadata(RESOURCE_VALIDATOR, targetController, handler.name);
+
+        const metadata: IActionMetadata = {
+            target: targetController,
+            method,
+            route,
+            handler,
+            authentication: [],
+            authorization: [],
+            generics: [],
+            args: args !== undefined ? args : [],
+            resolvers: resolvers !== undefined ? resolvers : [],
+            validators: validators !== undefined ? validators : []
+        };
+
+        // Add action to array.
+        actions.push(metadata);
     }
 
-    public static defineActionMiddleware<T>(
-        targetController: IType<any>,
-        order: EMiddlewareOrder,
-        service: IType<T>,
+    public static defineActionAuthentication<T>(
+        targetController: TType<any>,
+        service: TType<T>,
         name: string,
         params: any[],
-        handler: ActionHandler<any>
+        handler: TActionHandler<any>
     ): void {
-        let actionMiddlewares = Reflect.getMetadata(ACTION_MIDDLEWARES, targetController, handler.name);
-        if (actionMiddlewares === undefined) {
-            actionMiddlewares = new Array<IActionMiddlewareMetadata>();
-            Reflect.defineMetadata(ACTION_MIDDLEWARES, actionMiddlewares, targetController, handler.name);
-        }
+        const action = this._getActionMetadata(targetController, handler);
 
-        this._addActionMiddlewareMetadata(actionMiddlewares, service, order, name, params);
+        action.authentication.unshift({
+            service,
+            name,
+            params
+        });
     }
 
-    public static defineActionArg(target: IType<any>, type: EArgType, handler: string, index: number, name: string, required: boolean): void {
-        let actionArgs = Reflect.getMetadata(ACTION_ARGS, target, handler);
-        if (actionArgs === undefined) {
-            actionArgs = new Array<IActionArgsMetadata>();
-            Reflect.defineMetadata(ACTION_ARGS, actionArgs, target, handler);
-        }
-
-        this._addActionArgsMetadata(actionArgs, type, index, name, required);
-    }
-
-    public static defineResolver<T>(
-        target: IType<any>,
-        handler: string,
-        index: number,
-        service: IType<T>,
+    public static defineActionAuthorization<T>(
+        targetController: TType<any>,
+        service: TType<T>,
         name: string,
-        auth: boolean,
-        optional: boolean
+        params: any[],
+        handler: TActionHandler<any>
     ): void {
-        let actionResolve = Reflect.getMetadata(ACTION_RESOLVE, target, handler);
-        if (actionResolve === undefined) {
-            actionResolve = new Array<IActionResolveMetadata>();
-            Reflect.defineMetadata(ACTION_RESOLVE, actionResolve, target, handler);
-        }
+        const action = this._getActionMetadata(targetController, handler);
 
-        this._addActionResolveMetadata(actionResolve, index, service, name, auth, optional);
+        action.authorization.unshift({
+            service,
+            name,
+            params
+        });
     }
 
-    public static definePolicy<T>(target: IType<any>, handler: string, index: number, service: IType<T>, name: string): void {
-        let policies = Reflect.getMetadata(ACTION_POLICY, target, handler);
-        if (policies === undefined) {
-            policies = new Array<IActionPolicyMetadata>();
-            Reflect.defineMetadata(ACTION_POLICY, policies, target, handler);
-        }
+    public static defineActionGeneric<T>(
+        targetController: TType<any>,
+        order: EMiddlewareOrder,
+        service: TType<T>,
+        name: string,
+        params: any[],
+        handler: TActionHandler<any>
+    ): void {
+        const action = this._getActionMetadata(targetController, handler);
 
-        this._addActionPolicyMetadata(policies, index, service, name);
+        action.generics.unshift({
+            service,
+            order,
+            name,
+            params
+        });
     }
 
-    public static defineSessionResource(
-        target: IType<any>,
+    public static defineResourceArg(
+        target: TType<any>,
+        type: EArgType,
         handler: string,
         index: number,
         name: string,
         required: boolean
     ): void {
-        let sessionResource = Reflect.getMetadata(SESSION_RESOURCE, target, handler);
-        if (sessionResource === undefined) {
-            sessionResource = new Array<ISessionResourceMetadata>();
-            Reflect.defineMetadata(SESSION_RESOURCE, sessionResource, target, handler);
+        let args = Reflect.getMetadata(RESOURCE_ARG, target, handler);
+        if (args === undefined) {
+            args = new Array<IResourceArgMetadata>();
+            Reflect.defineMetadata(RESOURCE_ARG, args, target, handler);
         }
 
-        this._addSessionResourceMetadata(sessionResource, index, name, required);
+        args.unshift({
+            type,
+            index,
+            name,
+            required
+        });
     }
 
-    public static getModuleMetadata<T>(targetModule: IType<T>): IModuleMetadata {
+    public static defineResourceResolver<T>(
+        target: TType<any>,
+        handler: string,
+        index: number,
+        service: TType<T>,
+        name: string,
+        optional: boolean
+    ): void {
+        let resolvers = Reflect.getMetadata(RESOURCE_RESOLVER, target, handler);
+        if (resolvers === undefined) {
+            resolvers = new Array<IResourceResolverMetadata>();
+            Reflect.defineMetadata(RESOURCE_RESOLVER, resolvers, target, handler);
+        }
+
+        resolvers.unshift({
+            service,
+            index,
+            name,
+            optional
+        });
+    }
+
+    public static defineResourceValidator<T>(
+        target: TType<any>,
+        handler: string,
+        index: number,
+        service: TType<T>,
+        name: string
+    ): void {
+        let validators = Reflect.getMetadata(RESOURCE_VALIDATOR, target, handler);
+        if (validators === undefined) {
+            validators = new Array<IResourceValidatorMetadata>();
+            Reflect.defineMetadata(RESOURCE_VALIDATOR, validators, target, handler);
+        }
+
+        validators.unshift({
+            service,
+            index,
+            name,
+        });
+    }
+
+    public static defineResourceInjectable(target: TType<any>, type: EInjectableType, index: number): void {
+        let injectables = Reflect.getMetadata(RESOURCE_INJECTABLE, target);
+        if (injectables === undefined) {
+            injectables = new Array<IProviderMetadata>();
+            Reflect.defineMetadata(RESOURCE_INJECTABLE, injectables, target);
+        }
+
+        injectables.push({
+            type,
+            index
+        });
+    }
+
+    public static getInjectableMetadata<T>(targetService: TType<T>): IInjectableMetadata[] {
+        return Reflect.getMetadata(RESOURCE_INJECTABLE, targetService);
+    }
+
+    public static getModuleMetadata<T>(targetModule: TType<T>): IModuleMetadata {
         return Reflect.getMetadata(MODULE, targetModule);
     }
 
-    public static getServiceMetadata<T>(targetService: IType<T>): IServiceMetadata {
+    public static getServiceMetadata<T>(targetService: TType<T>): IServiceMetadata {
         return Reflect.getMetadata(SERVICE, targetService);
     }
 
-    public static getMigrationMetadata<T>(targetMigration: IType<T>): IMigrationMetadata {
+    public static getMigrationMetadata<T>(targetMigration: TType<T>): IMigrationMetadata {
         return Reflect.getMetadata(MIGRATION, targetMigration);
     }
 
-    public static getControllerMetadata<T>(injectedController: IType<T>): IControllerMetadata {
+    public static getControllerMetadata<T>(injectedController: TType<T>): IControllerMetadata {
         return Reflect.getMetadata(CONTROLLER, injectedController) as IControllerMetadata;
     }
 
-    public static getMiddlewareMetadata<T>(targetService: IType<T>, name: string): IMiddlewareMetadata {
+    public static getAuthenticationMetadata<T>(targetService: TType<T>, name: string): IMiddlewareMetadata {
+        return this._getMiddlewareMetadata(MIDDLEWARE_AUTHENTICATION, targetService, name);
+    }
+
+    public static getResolverMetadata<T>(targetService: TType<T>, name: string): IMiddlewareMetadata {
+        return this._getMiddlewareMetadata(MIDDLEWARE_RESOLVER, targetService, name);
+    }
+
+    public static getPolicyMetadata<T>(targetService: TType<T>, name: string): IMiddlewareMetadata {
+        return this._getMiddlewareMetadata(MIDDLEWARE_POLICY, targetService, name);
+    }
+
+    public static getGenericMetadata<T>(targetService: TType<T>, name: string): IMiddlewareMetadata {
+        return this._getMiddlewareMetadata(MIDDLEWARE_GENERIC, targetService, name);
+    }
+
+    private static _getActionMetadata<T>(targetController: TType<T>, handler: TActionHandler<any>): IActionMetadata {
+        const actions = Reflect.getMetadata(ACTIONS, targetController) as IActionMetadata[];
+        const action = actions.find((a: IActionMetadata) => a.handler === handler);
+        if (action === undefined) {
+            throw new Error(`Action metadata not found for: ${targetController.name}.${handler.name}`);
+        }
+
+        return action;
+    }
+
+    private static _getMiddlewareMetadata<T>(type: symbol, targetService: TType<T>, name: string): IMiddlewareMetadata {
         // First find the service.
         const serviceMetadata = this.getServiceMetadata(targetService);
         if (serviceMetadata === undefined) {
@@ -498,225 +743,104 @@ export class Registry {
 
         // Now find the middleware by name.
         return serviceMetadata.middlewares.find((m: IMiddlewareMetadata) => {
-            return m.name === name;
+            return m.type === type && m.name === name;
         });
     }
 
-    public static getActionMiddlewareMetadata<T>(targetController: IType<T>, handler: ActionHandler<any>): IActionMiddlewareMetadata[] {
-        const metadata = Reflect.getMetadata(ACTION_MIDDLEWARES, targetController, handler.name) as IActionMiddlewareMetadata[];
+}
 
-        return metadata !== undefined ? metadata : [];
+export class TestRegistry {
+
+    private static SERVICE_STUBS: IServiceStubDefinition<any, any>[] = [];
+
+    private static SERVICE_STUB_FAKES: IServiceFakeDefinition<any, any>[] = [];
+
+    private static TEST_SUITES: ISuiteDefinition<any>[] = [];
+
+    private static TEST_SUITE_STUBS: ISuiteStub<any, any>[] = [];
+
+    private static TEST_SUITE_ROUTERS: ISuiteRouter<any>[] = [];
+
+    private static TEST_SUITE_FUNCS: ISuiteFunction<any, any>[] = [];
+
+    public static get serviceStubs(): IServiceStubDefinition<any, any>[] {
+        return this.SERVICE_STUBS;
     }
 
-    public static getInjectableMetadata<T>(targetService: IType<T>): IInjectableMetadata[] {
-        return Reflect.getMetadata(INJECTABLES, targetService);
+    public static get serviceStubFakes(): IServiceFakeDefinition<any, any>[] {
+        return this.SERVICE_STUB_FAKES;
     }
 
-    private static _setModuleMetadata<T>(targetModule: IType<T>, params: IModuleParameters): IModuleMetadata {
-        const metadata: IModuleMetadata = {
-            name: targetModule.name,
-            params
-        };
-
-        // Save target module metadata.
-        Reflect.defineMetadata(MODULE, metadata, targetModule);
-
-        return metadata;
+    public static get testSuites(): ISuiteDefinition<any>[] {
+        return this.TEST_SUITES;
     }
 
-    private static _setServiceMetadata<T>(
-        targetService: IType<T>,
-        properties: IPropertyMetadata[],
-        middlewares: IMiddlewareMetadata[]
-    ): IServiceMetadata {
-        const metadata: IServiceMetadata = {
-            name: targetService.name,
-            properties,
-            middlewares
-        };
-
-        // Save target service metadata.
-        Reflect.defineMetadata(SERVICE, metadata, targetService);
-
-        return metadata;
+    public static get testSuiteStubs(): ISuiteStub<any, any>[] {
+        return this.TEST_SUITE_STUBS;
     }
 
-    private static _setMigrationMetadata<T>(targetMigration: IType<T>, name: string): IMigrationMetadata {
-        const metadata: IMigrationMetadata = {
-            name
-        };
-
-        Reflect.defineMetadata(MIGRATION, metadata, targetMigration);
-
-        return metadata;
+    public static get testSuiteRouters(): ISuiteRouter<any>[] {
+        return this.TEST_SUITE_ROUTERS;
     }
 
-    private static _setControllerMetadata<T>(targetController: IType<T>, route: string, actions: IActionMetadata[]): IControllerMetadata {
-        const metadata: IControllerMetadata = {
-            name: targetController.name,
-            route,
-            actions
-        };
-
-        // Save target controller metadata.
-        Reflect.defineMetadata(CONTROLLER, metadata, targetController);
-
-        return metadata;
+    public static get testSuiteFuncs(): ISuiteFunction<any, any>[] {
+        return this.TEST_SUITE_FUNCS;
     }
 
-    private static _addInjectableMetadata(injectables: IInjectableMetadata[], type: EInjectableType, index: number): IInjectableMetadata {
-        const metadata: IInjectableMetadata = {
-            type,
+    public static declareServiceStub<T, U>(RealType: TType<T>, StubType: TType<U>): void {
+        this.SERVICE_STUBS.push({
+            RealType,
+            StubType,
+            fakes: []
+        });
+    }
+
+    public static declareServiceStubFake<T, U>(StubType: TType<T>, name: string, func: (...args: any[]) => U, auto: boolean): void {
+        this.SERVICE_STUB_FAKES.push({
+            StubType,
+            name,
+            func,
+            auto
+        })
+    }
+
+    public static declareTestSuite<T>(Type: TType<T>, title: string, run: boolean): void {
+        this.TEST_SUITES.push({
+            Type,
+            title,
+            run
+        });
+    }
+
+    public static declareTestSuiteStub<T, U>(SuiteType: TType<T>, StubType: TType<U>, index: number): void {
+        this.TEST_SUITE_STUBS.push({
+            SuiteType,
+            StubType,
             index
-        };
-
-        injectables.push(metadata);
-
-        return metadata;
+        });
     }
 
-    private static _addMiddlewareMetadata<T>(
-        middlewares: IMiddlewareMetadata[],
-        targetService: IType<T>,
-        name: string,
-        handler: MiddlewareHandler<any>
-    ): IMiddlewareMetadata {
-        // Add args.
-        const args = Reflect.getMetadata(ACTION_ARGS, targetService, handler.name);
-        const session = Reflect.getMetadata(SESSION_RESOURCE, targetService, handler.name);
-
-        const metadata: IMiddlewareMetadata = {
-            service: targetService.name,
-            name,
-            handler,
-            args: args !== undefined ? args : [],
-            session: session !== undefined ? session : []
-        };
-
-        // Add middleware to array.
-        middlewares.push(metadata);
-
-        return metadata;
+    public static declareTestRouter<T, U>(SuiteType: TType<T>, index: number): void {
+        this.TEST_SUITE_ROUTERS.push({
+            SuiteType,
+            index
+        });
     }
 
-    private static _addActionMetadata(
-        actions: IActionMetadata[],
-        target: IType<any>,
-        method: ERequestMethod,
-        route: string,
-        handler: ActionHandler<any>
-    ): IActionMetadata {
-        // Add args
-        const args = Reflect.getMetadata(ACTION_ARGS, target, handler.name);
-        const resolve = Reflect.getMetadata(ACTION_RESOLVE, target, handler.name);
-        const policies = Reflect.getMetadata(ACTION_POLICY, target, handler.name);
-
-        const metadata: IActionMetadata = {
-            target,
-            method,
-            route,
-            handler,
-            args: args !== undefined ? args : [],
-            resolve: resolve !== undefined ? resolve : [],
-            policies: policies !== undefined ? policies : []
-        };
-
-        // Add action to array.
-        actions.push(metadata);
-
-        return metadata;
+    public static declareTestSuiteFunc<T, U>(
+        SuiteType: TType<T>,
+        funcType: ESuiteFunctionType,
+        title: string,
+        func: (...args: any[]) => U,
+        run: boolean,
+    ): void {
+        this.TEST_SUITE_FUNCS.push({
+            type: funcType,
+            SuiteType,
+            title,
+            func,
+            run
+        });
     }
 
-    private static _addActionMiddlewareMetadata<T>(
-        actionMiddlewares: IActionMiddlewareMetadata[],
-        service: IType<T>,
-        order: EMiddlewareOrder,
-        name: string,
-        params: any[]
-    ): IActionMiddlewareMetadata {
-        const metadata: IActionMiddlewareMetadata = {
-            service,
-            order,
-            name,
-            params
-        };
-
-        actionMiddlewares.unshift(metadata);
-
-        return metadata;
-    }
-
-    private static _addActionArgsMetadata(
-        actionArgs: IActionArgsMetadata[],
-        type: EArgType,
-        index: number,
-        name: string,
-        required: boolean
-    ): IActionArgsMetadata {
-        const metadata: IActionArgsMetadata = {
-            type,
-            index,
-            name,
-            required
-        };
-
-        actionArgs.unshift(metadata);
-
-        return metadata;
-    }
-
-    private static _addActionResolveMetadata<T>(
-        resolveMetadata: IActionResolveMetadata[],
-        index: number,
-        service: IType<T>,
-        name: string,
-        auth: boolean,
-        optional: boolean
-    ): IActionResolveMetadata {
-        const metadata: IActionResolveMetadata = {
-            service,
-            index,
-            name,
-            auth,
-            optional
-        };
-
-        resolveMetadata.unshift(metadata);
-
-        return metadata;
-    }
-
-    private static _addActionPolicyMetadata<T>(
-        policies: IActionPolicyMetadata[],
-        index: number,
-        service: IType<T>,
-        name: string
-    ): IActionPolicyMetadata {
-        const metadata: IActionPolicyMetadata = {
-            service,
-            index,
-            name
-        };
-
-        policies.unshift(metadata);
-
-        return metadata;
-    }
-
-    private static _addSessionResourceMetadata(
-        sessionResources: ISessionResourceMetadata[],
-        index: number,
-        name: string,
-        required: boolean
-    ): ISessionResourceMetadata {
-        const metadata: ISessionResourceMetadata = {
-            index,
-            name,
-            required
-        };
-
-        sessionResources.unshift(metadata);
-
-        return metadata;
-    }
 }

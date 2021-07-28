@@ -103,37 +103,37 @@ describe("Ornate App", () => {
     });
 
     it("App services are initialized", async () => {
-        const initSpy = sinon.stub(app.getService(TestService1), "onInit");
+        for (const module of app.modules) {
+            const initSpy = sinon.stub(module.injector.getService(TestService1), "onInit");
 
-        await expect(app.run()).to.not.be.rejected;
-        sinon.assert.calledOnce(initSpy);
+            await expect(app.run()).to.not.be.rejected;
+            sinon.assert.calledOnce(initSpy);
 
-        initSpy.restore();
+            initSpy.restore();
+        }
     });
 
     it("Services are injected", async () => {
-        const workSpy = sinon.stub(app.getService(TestService1), "work");
+        for (const module of app.modules) {
+            const workSpy = sinon.stub(module.injector.getService(TestService1), "work");
 
-        app.getService(TestService2).workWithInjectedService();
+            module.injector.getService(TestService2).workWithInjectedService();
 
-        sinon.assert.calledOnce(workSpy);
+            sinon.assert.calledOnce(workSpy);
 
-        workSpy.restore();
+            workSpy.restore();
+        }
     });
 
     it("Calls the /hello api route", async () => {
-        const test = app.getRouter().get("/test/hello");
-
-        const { headers, body } = await test.run();
+        const { headers, body } = await app.getRouter().get("/test/hello");
 
         expect(headers["content-type"]).to.equal("text/html; charset=utf-8");
         expect(body).to.equal("Hello");
     });
 
     it("Calls the /hello/:name api route", async () => {
-        const test = app.getRouter().get("/test/hello/ornate");
-
-        const { headers, body } = await test.run();
+        const { headers, body } = await app.getRouter().get("/test/hello/ornate");
 
         expect(headers["content-type"]).to.equal("text/html; charset=utf-8");
         expect(body).to.equal("Hello ornate");
@@ -143,9 +143,7 @@ describe("Ornate App", () => {
         const name = "Ornate";
         const email = "ornate@example.com";
 
-        const test = app.getRouter().put(`/test/hello/user?name=${name}&email=${email}`);
-
-        const { headers, body } = await test.run<IUser>();
+        const { headers, body } = await app.getRouter().put<IUser>(`/test/hello/user?name=${name}&email=${email}`);
 
         expect(headers["content-type"]).to.equal("application/json; charset=utf-8");
         expect(body.name).to.equals(name);
@@ -154,9 +152,7 @@ describe("Ornate App", () => {
     });
 
     it("Fails calling the /hello/create api route (missing parameters", async () => {
-        const test = app.getRouter().put("/test/hello/user");
-
-        await expect(test.run<IUser>()).to.be.rejected;
+        await expect(app.getRouter().put<IUser>("/test/hello/user")).to.be.rejected;
     });
 
 });

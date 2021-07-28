@@ -1,6 +1,6 @@
 import * as httpStatus from "http-status-codes";
 
-export const enum ResponseType {
+export const enum EResponseType {
     NULL = 0,
     RAW = 1,
     TEXT = 2,
@@ -14,12 +14,12 @@ export interface IResponseHeaders {
 export class ActionResponse<T> {
 
     private _status: number;
-    private _type: ResponseType;
+    private _type: EResponseType;
     private _data: T;
     private _headers: IResponseHeaders;
     private _next: boolean;
 
-    constructor(status: number, type: ResponseType, data: T, headers: IResponseHeaders, next = true) {
+    constructor(status: number, type: EResponseType, data: T, headers: IResponseHeaders, next = true) {
         this._status = status;
         this._type = type;
         this._data = data;
@@ -31,7 +31,7 @@ export class ActionResponse<T> {
         return this._status;
     }
 
-    public get type(): ResponseType {
+    public get type(): EResponseType {
         return this._type;
     }
 
@@ -51,30 +51,30 @@ export class ActionResponse<T> {
 
 export class NullResponse extends ActionResponse<void> {
     constructor(headers?: IResponseHeaders, next = true) {
-        super(httpStatus.OK, ResponseType.RAW, undefined, headers, next);
+        super(httpStatus.OK, EResponseType.RAW, undefined, headers, next);
     }
 }
 
 export class RawResponse extends ActionResponse<Buffer> {
     constructor(data: Buffer, headers?: IResponseHeaders, next = false) {
-        super(httpStatus.OK, ResponseType.RAW, data, headers, next);
+        super(httpStatus.OK, EResponseType.RAW, data, headers, next);
     }
 }
 
 export class TextResponse extends ActionResponse<string> {
     constructor(data: string, headers?: IResponseHeaders, next = false) {
-        super(httpStatus.OK, ResponseType.TEXT, data, headers, next);
+        super(httpStatus.OK, EResponseType.TEXT, data, headers, next);
     }
 }
 
 export class JsonResponse<T> extends ActionResponse<T> {
     constructor(data?: T, headers?: IResponseHeaders, next = false) {
-        super(httpStatus.OK, ResponseType.JSON, data, headers, next);
+        super(httpStatus.OK, EResponseType.JSON, data, headers, next);
     }
 }
 
 export class RedirectResponse extends ActionResponse<string> {
     constructor(url: string, headers?: IResponseHeaders, next = false) {
-        super(httpStatus.MOVED_TEMPORARILY, ResponseType.JSON, url, headers, next);
+        super(httpStatus.MOVED_TEMPORARILY, EResponseType.JSON, url, headers, next);
     }
 }

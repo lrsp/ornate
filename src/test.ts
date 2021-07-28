@@ -5,6 +5,8 @@ import * as util from "util";
 import * as fetch from "node-fetch";
 import * as httpStatus from "http-status-codes";
 
+import { App } from "app";
+
 const HEADER_CONTENT_LENGTH  = "content-length";
 const HEADER_CONTENT_TYPE = "content-type";
 
@@ -20,6 +22,17 @@ export interface IHttpHeaders {
 export interface IApiResponse<T> {
     headers: IHttpHeaders;
     body: T;
+}
+
+export interface ITestRequestOptions {
+    body?: fetch.BodyInit;
+    params?: {[param: string]: string};
+    query?: {[param: string]: string};
+    headers?: fetch.HeaderInit;
+}
+
+export interface ITestRouter {
+    [method: string]: <T>(url: string, options?: ITestRequestOptions) => Promise<IApiResponse<T>>;
 }
 
 export class TestError extends Error {
@@ -49,12 +62,7 @@ export class TestError extends Error {
     }
 }
 
-export interface ITestRequestOptions {
-    body?: fetch.BodyInit;
-    headers?: fetch.HeaderInit;
-}
-
-export class Test {
+export class Test<T> {
 
     private _server: http.Server;
     private _host: string;
@@ -63,17 +71,18 @@ export class Test {
     private _url: string;
     private _options: ITestRequestOptions;
 
-    constructor(server: http.Server, method: string, url: string, options: ITestRequestOptions) {
-        this._server = server.listen(0);
+    constructor(app: App, method: string, route: string, options: ITestRequestOptions) {
+        this._url = app.getUrl(route, options.params, options.query);
+
+        this._server = app.server.listen(0);
 
         const info = this._server.address() as AddressInfo;
         this._host = util.format("http://127.0.0.1:%s", info.port);
         this._method = method;
-        this._url = url;
         this._options = options;
     }
 
-    public async run<T>(): Promise<IApiResponse<T>> {
+    public async run(): Promise<IApiResponse<T>> {
         try {
             const options = {
                 method: this._method,
@@ -90,9 +99,9 @@ export class Test {
             }
 
             const headers = this._getHeaders(response);
-            const body = await this._getBody<T>(response);
+            const body = await this._getBody(response);
 
-            this.end();
+            this._server.close();
 
             return {
                 headers,
@@ -100,13 +109,9 @@ export class Test {
             };
 
         } catch (err) {
-            this.end();
+            this._server.close();
             throw err;
         }
-    }
-
-    public end(): void {
-        this._server.close();
     }
 
     private _getHeaders(response: fetch.Response): IHttpHeaders {
@@ -124,7 +129,7 @@ export class Test {
         return headers;
     }
 
-    private async _getBody<T>(response: fetch.Response): Promise<T | string> {
+    private async _getBody(response: fetch.Response): Promise<T | string> {
         const contentLength = parseInt(response.headers.get(HEADER_CONTENT_LENGTH), 10);
         if (contentLength === 0) {
             return undefined;

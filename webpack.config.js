@@ -1,6 +1,5 @@
 const colors = require("ansi-colors");
 const path = require("path");
-const fs = require("fs");
 const nodeExternals = require("webpack-node-externals");
 
 const TsconfigPathsPlugin = require("tsconfig-paths-webpack-plugin");
@@ -9,24 +8,6 @@ const TerserPlugin = require("terser-webpack-plugin");
 const CONFIG_FILE = path.resolve(__dirname, "tsconfig.json");
 const SRC_PATH = path.resolve(__dirname, "src");
 const BUILD_PATH = path.resolve(__dirname, "dist");
-
-const WatchReportPlugin = function() {
-    this.plugin("watch-run", (watching, done) => {
-        const name = watching.options.name;
-        const context = watching.context;
-		const changed = Object.keys(watching.watchFileSystem.watcher.mtimes);
-
-        if (changed.length > 0) {
-			console.info(`${colors.green(name)} build triggered on ${colors.yellow(context)}`);
-            for (const file of changed) {
-                const filename = "." + file.substr(context.length);
-                console.info(`  Updated file: ${colors.red(filename)}`);
-            }
-        }
-
-        done();
-      });
-};
 
 const environment = process.env.NODE_ENV;
 
@@ -86,7 +67,7 @@ const ornateConfig = {
             {
                 test: /\.ts$/,
                 include: SRC_PATH,
-                loaders: ["ts-loader"]
+                loader: "ts-loader"
             }
         ]
     },
@@ -95,7 +76,6 @@ const ornateConfig = {
         plugins: [new TsconfigPathsPlugin({ configFile: CONFIG_FILE })]
 	},
 	plugins: [
-        WatchReportPlugin
     ],
     optimization,
     watchOptions: {

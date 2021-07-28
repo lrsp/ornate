@@ -941,7 +941,7 @@ export class App {
 
         const handledParamKeys = this._handleRequestSource(context.params, paramKeys, args);
         const handledQueryKeys = this._handleRequestSource(context.query, queryKeys, args);
-        const handledBodyKeys = this._handleRequestSource(context.request.body, bodyKeys, args);
+        const handledBodyKeys = this._handleRequestSource(context.body, bodyKeys, args);
 
         return {
             params: handledParamKeys,
@@ -1031,7 +1031,7 @@ export class App {
     private _reportUnhandledKeys(action: string, keys: IHandledKeys, context: TAppContext): void {
         const paramsKeys = Object.keys(context.params).filter((key) => keys.params.indexOf(key) === -1);
         const queryKeys = Object.keys(context.query).filter((key) => keys.query.indexOf(key) === -1);
-        const bodyKeys = Object.keys(context.request.body).filter((key) => keys.body.indexOf(key) === -1);
+        const bodyKeys = Object.keys(context.body).filter((key) => keys.body.indexOf(key) === -1);
 
         paramsKeys.forEach((key) => this._logger.warn("[ornate] Action: %s detected unhandled url parameter: %s", action, key));
         queryKeys.forEach((key) => this._logger.warn("[ornate] Action: %s detected unhandled query parameter: %s", action, key));

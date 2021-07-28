@@ -1,14 +1,14 @@
 {
   "name": "ornatejs",
   "version": "1.0.6",
-  "description": "A decorator library to build node apps using express and dependency injection",
+  "description": "A decorator library to build node apps using koa and dependency injection",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "repository": "https://github.com/lrsp/ornate.git",
   "author": "Lucas R. San Pedro <lucas@sanpedro.io>",
   "license": "MIT",
   "keywords": [
-    "express",
+    "koa",
     "decorators",
     "dependency injection"
   ],

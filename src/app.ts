@@ -152,15 +152,6 @@ export class AppInjector {
         return instance as T;
     }
 
-    public getOrCreateService<T extends IServiceInstance>(target: TType<T>): T {
-        let instance = this._services.get(target);
-        if (instance === undefined) {
-            instance = this.newInstance(target);
-            this._services.set(target, instance);
-        }
-        return instance as T;
-    }
-
     public getProvider<T extends IServiceInstance>(name: string, ...params: any[]): T {
         let instance = this._providers.get(name);
         if (instance === undefined) {
@@ -173,8 +164,7 @@ export class AppInjector {
                 throw new Error(util.format("Provider not found: %s", colors.cyan(name)));
             }
 
-            instance = this.newInstance(provider.type, ...params);
-            this._providers.set(name, instance);
+            instance = this.newProvider(name, provider.type, ...params);
         }
         return instance as T;
     }
@@ -191,7 +181,36 @@ export class AppInjector {
         return [...this._migrations.keys()];
     }
 
-    public newInstance<T>(target: TType<T>, ...params: any[]): any {
+    public newService<T extends IServiceInstance>(target: TType<T>): T {
+        let instance = this._services.get(target);
+        if (instance === undefined) {
+            instance = this._newInstance(target);
+            this._services.set(target, instance);
+        }
+        return instance as T;
+    }
+
+    public newProvider<T extends IProviderInstance>(name: string, target: TType<T>, ...params: any[]): T {
+        const instance = this._newInstance(target, ...params) as T;
+
+        this._providers.set(name, instance);
+
+        return instance;
+    }
+
+    public newMigration<T extends IMigrationInstance>(name: string, target: TType<T>): T {
+        const instance = this._newInstance(target) as T;
+
+        this._migrations.set(name, instance);
+
+        return instance;
+    }
+
+    public newController<T extends ControllerInstance>(target: TType<T>): T {
+        return this._newInstance(target) as T;
+    }
+
+    private _newInstance<T>(target: TType<T>, ...params: any[]): T {
         // @TODO: This will fail on a circular dependency, with a cryptic error.
         // Detect those by analysing what we're instantiating.
         const paramtypes = Reflect.getOwnMetadata("design:paramtypes", target);
@@ -220,7 +239,7 @@ export class AppInjector {
                     }
                 }
 
-                return this.getOrCreateService(f);
+                return this.newService(f);
             });
 
         return target.bind(undefined, ...args, ...params);
@@ -520,7 +539,7 @@ export class App {
             return existingService;
         }
 
-        const serviceInstance = moduleInstance.injector.getOrCreateService(targetService);
+        const serviceInstance = moduleInstance.injector.newService(targetService);
 
         this._logger.debug("[ornate] [%s] %s",
             colors.blue(moduleInstance.name),
@@ -554,12 +573,12 @@ export class App {
         return providerInstance;
     }
 
-    private _registerMigration<T>(
+    private _registerMigration<T extends IMigrationInstance>(
         moduleInstance: IModuleInstance,
         targetMigration: TType<T>
     ): void {
         const migrationMetadata = AppRegistry.getMigrationMetadata(targetMigration) as IMigrationMetadata;
-        const migrationInstance = moduleInstance.injector.newInstance(targetMigration);
+        const migrationInstance = moduleInstance.injector.newMigration(migrationMetadata.name, targetMigration);
 
         this._logger.debug("[ornate] [%s] %s (%s)",
             colors.blue(moduleInstance.name),
@@ -570,12 +589,12 @@ export class App {
         moduleInstance.migrations.push(migrationInstance);
     }
 
-    private _registerController<T>(
+    private _registerController<T extends ControllerInstance>(
         moduleInstance: IModuleInstance,
         targetController: TType<T>
     ): void {
         const controllerMetadata = AppRegistry.getControllerMetadata(targetController);
-        const controllerInstance = moduleInstance.injector.newInstance(targetController);
+        const controllerInstance = moduleInstance.injector.newController(targetController);
 
         const controllerRoute = controllerMetadata.route !== undefined ? controllerMetadata.route : "";
 
@@ -941,7 +960,7 @@ export class App {
 
         const handledParamKeys = this._handleRequestSource(context.params, paramKeys, args);
         const handledQueryKeys = this._handleRequestSource(context.query, queryKeys, args);
-        const handledBodyKeys = this._handleRequestSource(context.body, bodyKeys, args);
+        const handledBodyKeys = this._handleRequestSource((context.request as any).body, bodyKeys, args);
 
         return {
             params: handledParamKeys,
@@ -1031,7 +1050,7 @@ export class App {
     private _reportUnhandledKeys(action: string, keys: IHandledKeys, context: TAppContext): void {
         const paramsKeys = Object.keys(context.params).filter((key) => keys.params.indexOf(key) === -1);
         const queryKeys = Object.keys(context.query).filter((key) => keys.query.indexOf(key) === -1);
-        const bodyKeys = Object.keys(context.body).filter((key) => keys.body.indexOf(key) === -1);
+        const bodyKeys = Object.keys((context.request as any).body).filter((key) => keys.body.indexOf(key) === -1);
 
         paramsKeys.forEach((key) => this._logger.warn("[ornate] Action: %s detected unhandled url parameter: %s", action, key));
         queryKeys.forEach((key) => this._logger.warn("[ornate] Action: %s detected unhandled query parameter: %s", action, key));
@@ -1199,7 +1218,7 @@ export class TestRunner {
                 return module.injector.getService(f);
             }
 
-            throw new Error(util.format("Invalid Test Suite constructor parameter: %s", f));
+            throw new Error(util.format("Could not resolve Test Suite constructor parameter: %s", f));
         });
 
         return SuiteType.bind(undefined, ...args);

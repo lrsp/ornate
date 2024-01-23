@@ -2,8 +2,9 @@
 
 import * as http from "http";
 import * as fetch from "node-fetch";
-import * as bodyParser from "body-parser";
-import express from "express";
+import Koa from "koa";
+import KoaRouter from "koa-router";
+import KoaBody from "koa-body";
 import "reflect-metadata";
 
 export class AppError<T> extends Error {
@@ -26,7 +27,7 @@ export class ResourceError extends AppError<any> {
 export class ParameterError extends AppError<string> {
     constructor(message: string, parameter?: string);
 }
-export const enum ResponseType {
+export const enum EResponseType {
     NULL = 0,
     RAW = 1,
     TEXT = 2,
@@ -36,9 +37,9 @@ export interface IResponseHeaders {
     [key: string]: string;
 }
 export class ActionResponse<T> {
-    constructor(status: number, type: ResponseType, data: T, headers: IResponseHeaders, next?: boolean);
+    constructor(status: number, type: EResponseType, data: T, headers: IResponseHeaders, next?: boolean);
     readonly status: number;
-    readonly type: ResponseType;
+    readonly type: EResponseType;
     readonly data: T;
     readonly headers: IResponseHeaders;
     readonly next: boolean;
@@ -58,16 +59,21 @@ export class JsonResponse<T> extends ActionResponse<T> {
 export class RedirectResponse extends ActionResponse<string> {
     constructor(url: string, headers?: IResponseHeaders, next?: boolean);
 }
+export const enum ESuiteFunctionType {
+    BEFORE_ALL = "before-all",
+    AFTER_ALL = "after-all",
+    TEST = "test"
+}
 export const enum EMiddlewareOrder {
     BEFORE = "before",
     AFTER = "after"
 }
 export const enum EArgType {
-    REQUEST = "request",
-    RESPONSE = "response",
+    CONTEXT = "context",
     HOST = "host",
     HOSTNAME = "hostname",
     HEADER = "header",
+    HEADER_AUTHORIZATION = "header-authorization",
     BODY = "body",
     PARAM = "param",
     QUERY = "query",
@@ -89,16 +95,12 @@ export const enum EPropertyType {
 export const enum EInjectableType {
     HTTP_SERVER = 0
 }
-export type ActionHandler<T> = (...args: any[]) => Promise<ActionResponse<T>>;
-export type MiddlewareHandler<T> = (...args: any[]) => Promise<T>;
-export type IType<T> = new (...args: any[]) => T;
-export type AnyType = IType<any>;
-export interface IAuthProvider {
-    checkRoutePermissions(auth: any[], method: ERequestMethod, path: string): boolean;
-}
+export type TType<T> = new (...args: any[]) => T;
+export type TActionHandler<T> = (...args: any[]) => Promise<ActionResponse<T>>;
+export type TMiddlewareHandler<T> = (...args: any[]) => Promise<T>;
 export interface IProviderParameters {
     readonly provides: any;
-    readonly service: IType<any>;
+    readonly service: TType<any>;
 }
 export interface IModuleParameters {
     readonly route?: string;
@@ -108,7 +110,6 @@ export interface IModuleParameters {
     readonly migrations?: AnyType[];
     readonly providers?: IProviderParameters[];
     readonly controllers?: AnyType[];
-    readonly auth?: Array<IType<IAuthProvider>>;
 }
 export interface IModuleMetadata {
     readonly name: string;
@@ -135,11 +136,10 @@ export interface IPropertyMetadata {
     name: string;
 }
 export interface IMiddlewareMetadata {
-    readonly service: string;
+    readonly target: string;
     readonly name: string;
     readonly handler: MiddlewareHandler<any>;
     readonly args: IActionArgsMetadata[];
-    readonly session: ISessionResourceMetadata[];
 }
 export interface IControllerMetadata {
     readonly name: string;
@@ -147,17 +147,29 @@ export interface IControllerMetadata {
     readonly actions: IActionMetadata[];
 }
 export interface IActionMetadata {
-    readonly target: IType<any>;
+    readonly target: TType<any>;
     readonly method: ERequestMethod;
     readonly route: string;
     readonly handler: ActionHandler<any>;
+    readonly authentication: IActionAuthenticationMetadata[];
+    readonly authorization: IActionAuthorizationMetadata[];
     readonly args: IActionArgsMetadata[];
     readonly resolve: IActionResolveMetadata[];
     readonly policies: IActionPolicyMetadata[];
 }
 export interface IActionMiddlewareMetadata {
-    readonly service: IType<any>;
+    readonly service: TType<any>;
     readonly order: EMiddlewareOrder;
+    readonly name: string;
+    readonly params: any[];
+}
+export interface IActionAuthenticateMetadata {
+    readonly service: TType<any>;
+    readonly name: string;
+    readonly params: any[];
+}
+export interface IActionAuthorizationMetadata {
+    readonly service: TType<any>;
     readonly name: string;
     readonly params: any[];
 }
@@ -168,71 +180,59 @@ export interface IActionArgsMetadata {
     readonly required: boolean;
 }
 export interface IActionResolveMetadata {
-    readonly service: IType<any>;
+    readonly service: TType<any>;
     readonly index: number;
     readonly name: string;
-    readonly auth: boolean;
     readonly optional: boolean;
 }
-export interface ISessionResourceMetadata {
-    readonly index: number;
-    readonly name: string;
-    readonly required: boolean;
-}
 export interface IActionPolicyMetadata {
-    readonly service: IType<any>;
+    readonly service: TType<any>;
     readonly index: number;
     readonly name: string;
 }
-export function Module(params?: IModuleParameters): (target: IType<any>) => void;
-export function Service(): <T>(target: IType<T>) => void;
-export function Migration(name: string): <T>(target: IType<T>) => void;
-export function Controller(route: string): <T>(target: IType<T>) => void;
+export function Module(params?: IModuleParameters): (target: TType<any>) => void;
+export function Service(): <T>(target: TType<T>) => void;
+export function Migration(name: string): <T>(target: TType<T>) => void;
+export function Controller(route: string): <T>(target: TType<T>) => void;
+export function Injector(): (target: any, handler: string, index: number) => void;
 export function HttpServer(): (target: any, handler: string, index: number) => void;
-export function Middleware(name: string): (target: any, handler: string, descriptor: PropertyDescriptor) => void;
+export function Authentication(name: string): (target: any, handler: string, descriptor: PropertyDescriptor) => void;
+export function Resolver(name: string): (target: any, handler: string, descriptor: PropertyDescriptor) => void;
+export function Policy(name: string): (target: any, handler: string, descriptor: PropertyDescriptor) => void;
+export function Generic(name: string): (target: any, handler: string, descriptor: PropertyDescriptor) => void;
 export function Get(route: string): (target: any, handler: string, descriptor: PropertyDescriptor) => void;
 export function Post(route: string): (target: any, handler: string, descriptor: PropertyDescriptor) => void;
 export function Put(route: string): (target: any, handler: string, descriptor: PropertyDescriptor) => void;
 export function Delete(route: string): (target: any, handler: string, descriptor: PropertyDescriptor) => void;
-export function Before<T>(service: IType<T>, name: string, ...params: any[]): (target: any, handler: string, descriptor: PropertyDescriptor) => void;
-export function After<T>(service: IType<T>, name: string, ...params: any[]): (target: any, handler: string, descriptor: PropertyDescriptor) => void;
-export function Auth<T>(service: IType<T>, name: string, required?: boolean): (target: any, handler: string, index: number) => void;
-export function Resolve<T>(service: IType<T>, name: string, required?: boolean): (target: any, handler: string, index: number) => void;
-export function Policy<T>(service: IType<T>, name: string): (target: any, handler: string, index: number) => void;
-export function Session(name: string, required?: boolean): (target: any, handler: string, index: number) => void;
-export function Req(): (target: any, handler: string, index: number) => void;
-export function Res(): (target: any, handler: string, index: number) => void;
+export function Authenticate<T>(service: TType<T>, name: string, ...params: any[]): (target: any, handler: string, descriptor: PropertyDescriptor) => void;
+export function Authorize<T>(service: TType<T>, name: string, ...params: any[]): (target: any, handler: string, descriptor: PropertyDescriptor) => void;
+export function Before<T>(service: TType<T>, name: string, ...params: any[]): (target: any, handler: string, descriptor: PropertyDescriptor) => void;
+export function After<T>(service: TType<T>, name: string, ...params: any[]): (target: any, handler: string, descriptor: PropertyDescriptor) => void;
+export function Resolve<T>(service: TType<T>, name: string, required?: boolean): (target: any, handler: string, index: number) => void;
+export function Validate<T>(service: TType<T>, name: string): (target: any, handler: string, index: number) => void;
+export function Context(): (target: any, handler: string, index: number) => void;
+export function State(): (target: any, handler: string, index: number) => void;
 export function Host(): (target: any, handler: string, index: number) => void;
 export function Hostname(): (target: any, handler: string, index: number) => void;
 export function Header(name: string, required?: boolean): (target: any, handler: string, index: number) => void;
-export function Authorization(type: string, required?: boolean): (target: any, handler: string, index: number) => void;
+export function Method(): (target: any, handler: string, index: number) => void;
+export function Route(): (target: any, handler: string, index: number) => void;
 export function Body(name: string, required?: boolean): (target: any, handler: string, index: number) => void;
 export function Param(name: string, required?: boolean): (target: any, handler: string, index: number) => void;
 export function Query(name: string, required?: boolean): (target: any, handler: string, index: number) => void;
-export function Method(): (target: any, handler: string, index: number) => void;
-export function Route(): (target: any, handler: string, index: number) => void;
-export class Registry {
-    static defineProperty(target: any, name: string, type: EPropertyType): void;
-    static defineModule<T>(targetModule: IType<T>, params: IModuleParameters): void;
-    static defineService<T>(targetService: IType<T>): void;
-    static defineMigration<T>(targetMigration: IType<T>, name: string): void;
-    static defineController(targetController: IType<any>, route: string): void;
-    static defineInjectable(target: IType<any>, type: EInjectableType, index: number): void;
-    static defineMiddleware(targetService: IType<any>, name: string, handler: MiddlewareHandler<any>): void;
-    static defineAction(targetController: IType<any>, method: ERequestMethod, route: string, handler: ActionHandler<any>): void;
-    static defineActionMiddleware<T>(targetController: IType<any>, order: EMiddlewareOrder, service: IType<T>, name: string, params: any[], handler: ActionHandler<any>): void;
-    static defineActionArg(target: IType<any>, type: EArgType, handler: string, index: number, name: string, required: boolean): void;
-    static defineResolver<T>(target: IType<any>, handler: string, index: number, service: IType<T>, name: string, required: boolean): void;
-    static definePolicy<T>(target: IType<any>, handler: string, index: number, service: IType<T>, name: string): void;
-    static defineSessionResource(target: IType<any>, handler: string, index: number, name: string, required: boolean): void;
-    static getModuleMetadata<T>(targetModule: IType<T>): IModuleMetadata;
-    static getServiceMetadata<T>(targetService: IType<T>): IServiceMetadata;
-    static getMigrationMetadata<T>(targetMigration: IType<T>): IMigrationMetadata;
-    static getControllerMetadata<T>(injectedController: IType<T>): IControllerMetadata;
-    static getMiddlewareMetadata<T>(targetService: IType<T>, name: string): IMiddlewareMetadata;
-    static getActionMiddlewareMetadata<T>(targetController: IType<T>, handler: ActionHandler<any>): IActionMiddlewareMetadata[];
-    static getInjectableMetadata<T>(targetService: IType<T>): IInjectableMetadata[];
-}
+
+export function ServiceStub<T>(RealType: TType<T>): <U>(StubType: TType<U>) => void;
+export function Fake(auto?: boolean): (StubType: any, handler: string, descriptor: PropertyDescriptor) => void;
+export function TestSuite(title: string, run = true): <T>(Type: TType<T>) => void;
+export function Stub<T, U>(StubType: TType<U>): (SuiteType: TType<T>, handler: string, index: number) => void;
+export function TestRouter<T>(): (SuiteType: TType<T>, handler: string, index: number) => void;
+export function BeforeAll(title: string, run = true): (StubType: any, handler: string, descriptor: PropertyDescriptor) => void;
+export function BeforeEach(title: string, run = true): (StubType: any, handler: string, descriptor: PropertyDescriptor) => void;
+export function AfterAll(title: string, run = true): (StubType: any, handler: string, descriptor: PropertyDescriptor) => void;
+export function AfterEach(title: string, run = true): (StubType: any, handler: string, descriptor: PropertyDescriptor) => void;
+export function Test(title: string, run = true): (StubType: any, handler: string, descriptor: PropertyDescriptor) => void;
+
+
 interface IServiceInstance {
     onInit?(app?: App): Promise<void>;
     onDestroy?(): Promise<void>;
@@ -254,27 +254,29 @@ export interface ILogger {
     error(...args: any[]): void;
 }
 export interface IBodyParserParams {
-    readonly raw?: bodyParser.Options;
-    readonly text?: bodyParser.OptionsText;
-    readonly json?: bodyParser.OptionsJson;
-    readonly urlencoded?: bodyParser.OptionsUrlencoded;
+    readonly text?: {limit: string | number};
+    readonly json?: {limit: string | number};
+    readonly urlencoded?: boolean;
 }
 export interface IAppParams {
     readonly logger?: ILogger;
-    readonly modules: Array<IType<any>>;
+    readonly modules: TType<any>[];
     readonly parser?: IBodyParserParams;
 }
-export interface IAppRequest extends express.Request {
-    args: any[];
-    session: Map<string, any>;
+export interface IAppContext {
+    method: ERequestMethod;
+    route: string;
 }
-export type AppResponse = express.Response;
-export class App {
-    constructor(params: IAppParams);
-    getModule<T>(target: IType<T>): T;
-    getService<T extends IServiceInstance>(target: IType<T>): T;
-    getMigrations(): string[];
+export type TAppContext = KoaRouter.RouterContext<any, IAppContext>;
+export class AppInjector {
+    getService<T extends IServiceInstance>(target: TType<T>): T;
+    getProvider<T extends IServiceInstance>(name: string, ...params: any[]): T
     getMigration<T extends IMigrationInstance>(name: string): T;
+    getMigrations(): string[];
+}
+export class App {
+    readonly injector: AppInjector;
+    constructor(params: IAppParams);
     getRouter(): {
         [type: string]: (url: string, options?: ITestRequestOptions) => Test;
     };
@@ -283,12 +285,20 @@ export class App {
     close(): Promise<void>;
     listen(host: string, port: number): Promise<void>;
 }
-export interface IHttpHeaders {
-    [key: string]: string;
+export class TestRunner {
+    constructor(app: App);
+    run(): Promise<void>;
+    stop(): Promise<void>;
 }
 export interface IApiResponse<T> {
     headers: IHttpHeaders;
     body: T;
+}
+export interface ITestRequestOptions {
+    body?: fetch.BodyInit;
+    params?: {[param: string]: string};
+    query?: {[param: string]: string};
+    headers?: fetch.HeaderInit;
 }
 export class TestError extends Error {
     constructor(route: string, status: number, statusText: string, message: string);
@@ -296,13 +306,11 @@ export class TestError extends Error {
     readonly status: number;
     readonly statusText: string;
 }
-export interface ITestRequestOptions {
-    body?: fetch.BodyInit;
-    headers?: fetch.HeaderInit;
+export interface ITestRouter {
+    [method: string]: <T>(url: string, options?: ITestRequestOptions) => Promise<IApiResponse<T>>;
 }
-export class Test {
+export class Test<T> {
     constructor(server: http.Server, method: string, url: string, options: ITestRequestOptions);
-    run<T>(): Promise<IApiResponse<T>>;
-    end(): void;
+    run(): Promise<IApiResponse<T>>;
 }
 
